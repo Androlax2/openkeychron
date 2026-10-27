@@ -1,0 +1,3 @@
+[files]
+# Recorded HID traffic is hex, not prose.
+extend-exclude = ["fixtures/**"]
