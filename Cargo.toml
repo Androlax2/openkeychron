@@ -1,0 +1,53 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/openkeychron-hid",
+    "crates/openkeychron-via",
+    "crates/openkeychron-keychron",
+    "crates/openkeychron-cli",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+# Tracks current stable: openkeychron ships as an app, so an older floor buys nobody anything.
+rust-version = "1.99"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Androlax2/openkeychron"
+description = "Native, local-first alternative to Keychron Launcher"
+
+[workspace.lints.rust]
+# `deny`, not `forbid`, so a crate that genuinely needs FFI can opt in locally
+# with `#[expect(unsafe_code, reason = "…")]`.
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+missing_errors_doc = "allow"
+doc_markdown = "allow"
+# Every suppression states a reason and prefers `#[expect]` over `#[allow]`.
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+assertions_on_result_states = "warn"
+cast_possible_truncation = "warn"
+cast_possible_wrap = "warn"
+cast_sign_loss = "warn"
+error_impl_error = "warn"
+exit = "warn"
+or_fun_call = "warn"
+ptr_as_ptr = "warn"
+tests_outside_test_module = "warn"
+undocumented_unsafe_blocks = "warn"
+
+[profile.dev]
+debug = "limited"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
