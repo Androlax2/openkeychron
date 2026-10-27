@@ -1,0 +1,3 @@
+# Found through `CLIPPY_CONF_DIR` in .cargo/config.toml.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
