@@ -1,0 +1,18 @@
+# Hand-written, not recorded: VIA "get protocol version" (command 0x01) answered with
+# protocol version 12 (0x000c). Used to test the replay transport itself.
+format_version = 1
+
+[device]
+name = "Synthetic VIA keyboard"
+vendor_id = 0x3434
+product_id = 0x0000
+usage_page = 0xff60
+usage = 0x61
+
+[[event]]
+kind = "write"
+data = "01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "01 00 0c 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"

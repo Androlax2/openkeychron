@@ -16,6 +16,11 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/Androlax2/openkeychron"
 description = "Native, local-first alternative to Keychron Launcher"
 
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+toml = "1"
+
 [workspace.lints.rust]
 # `deny`, not `forbid`, so a crate that genuinely needs FFI can opt in locally
 # with `#[expect(unsafe_code, reason = "…")]`.
