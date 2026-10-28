@@ -62,6 +62,25 @@ means a green PR.
 Builds use `--locked`. After changing a `Cargo.toml`, run `cargo update -w` and commit the
 updated `Cargo.lock` with it.
 
+## Git hooks (optional)
+
+`.githooks/` holds two hooks that call the same `make` targets as CI:
+
+| Hook | Runs | When |
+|---|---|---|
+| `pre-commit` | `make fmt typos` | every commit, fast |
+| `pre-push` | `make ci` | every push, the full gate |
+
+They are off until you turn them on in your clone:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+Read both scripts first: they run with your rights. Turn them off again with
+`git config --unset core.hooksPath`. Why plain scripts and not a hook manager:
+[`DECISIONS.md`](DECISIONS.md).
+
 ## Running against a fixture (no keyboard)
 
 Protocol code is tested by replaying recorded HID traffic; see [`FIXTURES.md`](FIXTURES.md).

@@ -71,3 +71,15 @@ A ruleset requires the six CI checks and blocks deleting or force-pushing `main`
 bypass. Squash merges give one commit per issue on `main`. Branches do not have to be up to
 date with `main` before merging: with squash merges that is safe enough, and it avoids constant
 branch updates.
+
+## 2026-10: Git hooks are plain scripts calling `make`, not prek
+
+Compared in #14: `prek` (a fast pre-commit rewrite with its own `prek.toml`), plain scripts in
+the repository, and no hooks. Plain scripts won: `.githooks/pre-commit` runs `make fmt typos`
+and `.githooks/pre-push` runs `make ci`. They need nothing installed and call the same targets
+as CI, so there is one gate and nothing to keep in sync. prek's extra built-in checks
+(whitespace, merge markers, large files) were not worth a pre-1.0 tool and a second config
+format. Revisit if the hooks grow beyond calling `make`.
+
+The hooks are opt-in per clone (`git config core.hooksPath .githooks`), because they run with
+the rights of whoever commits. CI and the `main` ruleset stay the real gate.

@@ -1,6 +1,6 @@
 # CI rules
 
-Applies to `Makefile`, `.github/`, `.config/typos.toml`, `.cargo/deny.toml`,
+Applies to `Makefile`, `.githooks/`, `.github/`, `.config/typos.toml`, `.cargo/deny.toml`,
 `.cargo/clippy.toml` and `rust-toolchain.toml`.
 
 ## One gate, two places
@@ -23,9 +23,10 @@ Applies to `Makefile`, `.github/`, `.config/typos.toml`, `.cargo/deny.toml`,
 
 ## The Makefile runs on Theo's machine
 
-`make` targets run with Theo's full rights outside the sandbox. Point out every Makefile
-change in the PR description. Targets only run checks: they never install, push or touch
-files outside the repository.
+`make` targets run with Theo's full rights outside the sandbox, and so do the hooks in
+`.githooks/` once he turns them on. Point out every change to either in the PR description.
+Targets and hooks only run checks: they never install, push or touch files outside the
+repository. Hooks only call `make` targets, so they cannot drift from CI.
 
 ## Never
 

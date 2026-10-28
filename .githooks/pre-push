@@ -1,0 +1,4 @@
+#!/bin/sh
+# The full CI gate before each push, so a red PR is caught locally.
+# Turn on once per clone with: git config core.hooksPath .githooks
+exec make ci
