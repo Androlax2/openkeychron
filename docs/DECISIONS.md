@@ -97,7 +97,11 @@ Its Linux backend reports a failed open as text only, so `openkeychron_hid::open
 the node with the standard library: that is how a permission error is recognised and turned
 into "install the udev rule".
 
-## 2026-10: Firmware flashing — research for #40 (recommendation, awaiting Theo's decision)
+## 2026-10: Firmware flashing stays out of openkeychron (#40)
+
+**Decision (Theo):** no built-in flashing for now. #40 is documentation and research only.
+Nothing below guarantees that every bad flash can be recovered: hardware recovery and what
+happens to settings are both uncertain (see "Uncertain").
 
 Read-only research: public sources only, nothing flashed, no device touched. Keychron source
 references are to `Keychron/qmk_firmware` at `2b493ff9`.
@@ -106,17 +110,19 @@ references are to `Keychron/qmk_firmware` at `2b493ff9`.
 
 | Firmware | Runs on | How it is updated | Recoverable after a failed update? |
 |---|---|---|---|
-| Keyboard (QMK) | STM32F401 (`v5_max/info.json`: `"bootloader": "stm32-dfu"`) | USB DFU from the STM32's ROM bootloader | **Yes**, see below |
+| Keyboard (QMK) | STM32F401 (`v5_max/info.json`: `"bootloader": "stm32-dfu"`) | USB DFU from the STM32's ROM bootloader | **Likely, not guaranteed**, see below |
 | Wireless module | LKBT51 | Keychron raw HID command `0xAA`, cable only (`common/keychron_raw_hid.c` → `lkbt51_dfu_rx`) | **Unknown**: closed firmware and protocol |
 | Keychron Link receiver | the receiver's own chip | Keychron Launcher | **Unknown**: closed firmware and protocol |
 
-### The keyboard firmware is hard to brick
+### Why the keyboard firmware is likely, but not certainly, recoverable
 
 - The STM32's DFU bootloader is in **System Memory, a factory ROM that cannot be erased or
   overwritten** (ST AN2606). Keychron's reset button under the space bar starts the chip in it
   (Keychron's QMK Toolbox guide: hold the reset button while plugging in the cable, until
-  "DFU device connected"). So a failed or interrupted flash, or a wrong file, can always be
-  undone by flashing the right file again, with a second keyboard to drive the computer.
+  "DFU device connected"). So a failed or interrupted flash, or a wrong file, should be
+  undone by flashing the right file again, with a second keyboard to drive the computer. This
+  rests on the reset button reaching that ROM bootloader on the V5 Max, which was not checked
+  on the board or its schematic; it is not a guarantee.
 - **The one real brick is the option bytes.** DFU tools can also write the STM32's option
   bytes; setting read protection to level 2 is irreversible and disables the ROM bootloader
   (STM32F4 reference manual, RM0368, "Read protection"). A tool must never write anything but
@@ -143,7 +149,7 @@ references are to `Keychron/qmk_firmware` at `2b493ff9`.
 - **On Linux, the DFU device (`0483:df11`) needs its own udev rule**, a separate permission
   decision from `70-openkeychron.rules`.
 
-### Recommendation
+### Recommendation (accepted)
 
 **Do not build flashing into openkeychron for now.** Keychron's Launcher and QMK Toolbox
 (`dfu-util`) already do it, the recovery path is hardware-only, and the upside is small next to
