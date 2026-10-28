@@ -38,6 +38,35 @@ mod tests {
             text.contains("Keychron Link (3434:d030, receiver)"),
             "{text}"
         );
+        assert!(
+            text.contains("Keychron firmware:    v1.1.0 (built 2025-03-17-10:00:00)"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn info_says_why_the_keychron_firmware_version_is_not_reported() {
+        let path = fixture("cli-info-no-keychron.toml");
+        let output = openkeychron(&["info", "--fixture", path.to_str().unwrap()]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        let text = stdout(&output);
+        assert!(
+            text.contains(
+                "Keychron firmware:    not reported (the firmware does not answer Keychron command 0xa0)"
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn info_json_reports_a_missing_keychron_version_as_null() {
+        let path = fixture("cli-info-no-keychron.toml");
+        let output = openkeychron(&["info", "--json", "--fixture", path.to_str().unwrap()]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+        assert!(json["keychron_firmware_version"].is_null());
+        assert!(json["keychron_firmware_build_date"].is_null());
+        assert!(json["keychron_firmware_not_reported"].is_string());
     }
 
     #[test]
@@ -50,6 +79,9 @@ mod tests {
         assert_eq!(json["uptime_ms"], 12_345);
         assert_eq!(json["device"]["product_id"], 0xd030);
         assert_eq!(json["device"]["is_receiver"], true);
+        assert_eq!(json["keychron_firmware_version"], "v1.1.0");
+        assert_eq!(json["keychron_firmware_build_date"], "2025-03-17-10:00:00");
+        assert!(json["keychron_firmware_not_reported"].is_null());
     }
 
     #[test]

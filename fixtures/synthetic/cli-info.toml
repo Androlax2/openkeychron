@@ -1,5 +1,6 @@
 # Hand-written, not recorded: the exchanges `openkeychron info` sends, in order (protocol
-# version, VIA firmware version, layout options, uptime), shaped like a Keychron Link.
+# version, VIA firmware version, layout options, uptime, then Keychron protocol 0xa0 and
+# firmware version 0xa1 "v1.1.0 2025-03-17-10:00:00"), shaped like a Keychron Link.
 # Bytes follow quantum/via.c. Real recordings come from #20.
 format_version = 1
 
@@ -41,3 +42,19 @@ data = "02 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
 [[event]]
 kind = "read"
 data = "02 01 00 00 30 39 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "a0 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a0 02 00 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "a1 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a1 76 31 2e 31 2e 30 20 32 30 32 35 2d 30 33 2d 31 37 2d 31 30 3a 30 30 3a 30 30 00 00 00 00 00"

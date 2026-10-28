@@ -134,7 +134,7 @@ impl<T: HidTransport> Keychron<T> {
     }
 
     /// Sends `request` padded to 32 bytes and checks the reply is for the same command.
-    fn exchange(&mut self, request: &[u8]) -> Result<[u8; REPORT_LEN], KeychronError> {
+    pub(crate) fn exchange(&mut self, request: &[u8]) -> Result<[u8; REPORT_LEN], KeychronError> {
         let sub = request.get(1).copied().filter(|_| request[0] == MISC_GROUP);
         let mut report = [0u8; REPORT_LEN];
         report[..request.len()].copy_from_slice(request);
