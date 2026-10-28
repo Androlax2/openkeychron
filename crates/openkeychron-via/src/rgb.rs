@@ -251,6 +251,28 @@ mod tests {
     }
 
     #[test]
+    fn rgb_effect_is_saved_after_its_read_back_matches() {
+        let mut via = via(&[
+            echoed(&[0x07, 3, 2, 6]),
+            exchange(&[0x08, 3, 2], &[0x08, 3, 2, 6]),
+            echoed(&[0x09, 3]),
+        ]);
+        assert_eq!(via.set_rgb_value(RgbValue::Effect(6)), Ok(()));
+        assert_eq!(via.into_transport().finish(), Ok(()));
+    }
+
+    #[test]
+    fn rgb_speed_is_saved_after_its_read_back_matches() {
+        let mut via = via(&[
+            echoed(&[0x07, 3, 3, 200]),
+            exchange(&[0x08, 3, 3], &[0x08, 3, 3, 200]),
+            echoed(&[0x09, 3]),
+        ]);
+        assert_eq!(via.set_rgb_value(RgbValue::Speed(200)), Ok(()));
+        assert_eq!(via.into_transport().finish(), Ok(()));
+    }
+
+    #[test]
     fn rgb_is_not_saved_when_the_effect_reads_back_clamped() {
         // An effect past the firmware's last one is clamped, here to 30.
         let mut via = via(&[
