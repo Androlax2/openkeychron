@@ -1,7 +1,11 @@
 # Keychron mice (G-series, M-series): protocol and fit
 
 Research for #42: what protocol Keychron mice use (including Keychron's ZGM / Zephyr firmware)
-and whether it fits openkeychron. Read-only, from public sources. Nothing was downloaded and
+and whether it fits openkeychron.
+
+**Decision (Theo, 2026-10-28): Keychron mouse support is deferred.** This research and its
+uncertainties are kept for later. No mouse implementation, new protocol crate,
+reverse engineering or hardware work is approved. Read-only, from public sources. Nothing was downloaded and
 run, no device was touched, and **Theo does not own a Keychron mouse**, so nothing here was
 checked on hardware.
 
@@ -78,7 +82,7 @@ Our code would need, at least:
 - a separate protocol crate, since nothing in `openkeychron-via` or `openkeychron-keychron`
   applies.
 
-## Recommendation
+## Recommendation (accepted)
 
 **Do not support Keychron mice now.** There is no published protocol beyond battery level, no
 open firmware to read, no mouse to test with, and a different transport from everything built
