@@ -23,11 +23,12 @@ With rustup instead of a distribution Rust, `rust-toolchain.toml` selects stable
 
 ### System packages
 
-None yet: the workspace builds with Rust alone. They arrive with the code that needs them:
+None yet: the workspace builds with Rust alone. Device access uses the `hidapi` crate's
+pure-Rust Linux backend (`linux-native-basic-udev`), which links no system library; see
+`docs/DECISIONS.md`. Packages arrive with the code that needs them:
 
 | Package | Arrives with | Why |
 |---|---|---|
-| `hidapi`, `libudev` (Arch: `hidapi`, `systemd-libs`) | #16, device discovery | talking to the keyboard over hidraw |
 | `webkit2gtk-4.1`, Node.js, `pnpm` | #33, the Tauri app | the desktop UI |
 
 Each of those issues updates this table with the exact package names.
