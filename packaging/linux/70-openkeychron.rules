@@ -1,0 +1,23 @@
+# openkeychron: let the logged-in user open the VIA raw HID channel of supported Keychron
+# devices, and no other interface on them. Install and remove: docs/INSTALL-linux.md.
+#
+# TAG+="uaccess" grants access only to the user of the active local session
+# (systemd-logind), only while that session is active. The file name must sort before
+# 73-seat-late.rules, which applies the tag.
+#
+# The usb_id builtin copies the USB vendor, product and interface number onto the hidraw
+# node, so one rule can match all three: ATTRS keys would all have to match one parent.
+
+SUBSYSTEM!="hidraw", GOTO="openkeychron_end"
+ACTION!="add|change", GOTO="openkeychron_end"
+IMPORT{builtin}="usb_id"
+
+# Keychron Link 2.4 GHz receiver, interface 3: its VIA channel (seen on hardware; the typing
+# interface is 2 and stays closed).
+ENV{ID_VENDOR_ID}=="3434", ENV{ID_MODEL_ID}=="d030", ENV{ID_USB_INTERFACE_NUM}=="03", TAG+="uaccess"
+
+# Keychron V5 Max ISO on a USB cable, interface 1: QMK always puts raw HID there
+# (tmk_core/protocol/usb_descriptor.h). Not yet seen on hardware (#20).
+ENV{ID_VENDOR_ID}=="3434", ENV{ID_MODEL_ID}=="0951", ENV{ID_USB_INTERFACE_NUM}=="01", TAG+="uaccess"
+
+LABEL="openkeychron_end"

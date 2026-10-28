@@ -94,9 +94,10 @@ replays `fixtures/synthetic/via-protocol-version.toml` through `ReplayTransport`
 
 ## Talking to the real keyboard (Linux)
 
-Not possible yet: device discovery is #16, and the udev rule that lets a normal user open the
-keyboard is #17. Until then, close Chrome, Keychron Launcher and VIA before any session with
-the keyboard: only one program can own its HID interface at a time.
+Not possible yet: device discovery is #16. A normal user also needs the udev rule in
+`packaging/linux/`; what it opens, and how to install, check and remove it, is in
+[`INSTALL-linux.md`](INSTALL-linux.md). Close Chrome, Keychron Launcher and VIA before any
+session with the keyboard.
 
 ## Where things are
 
