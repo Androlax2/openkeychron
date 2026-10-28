@@ -52,6 +52,18 @@ into a macro.
 The CLI records with `--record <file>`, for example `openkeychron info --record detect.toml`.
 Recordings need the real keyboard, so they are `needs-hardware` issues for Theo.
 
+`info --record <file>` also saves completed exchanges when a query fails, including a
+`read_timeout` event when no reply arrived. The command still exits with an error; a saved
+file does not mean detection succeeded. Failed writes and non-timeout I/O errors are not
+fixture events, so a disconnected device may leave only the earlier exchanges. If saving
+also fails, the error reports both failures. Other commands currently save only on success.
+
+For a separately approved receiver diagnostic, `info --reply-timeout-ms 5000` waits up to
+five seconds **per reply**, for both VIA and Keychron queries. The default stays 500 ms;
+accepted values are 1–60000 ms. The fixture format does not store the wait duration, so
+record the chosen value alongside a capture. Replaying a timeout fixture reproduces the
+error immediately rather than waiting, and still checks that every event was consumed.
+
 ## Reviewing a fixture
 
 1. The `[device]` table matches the interface you recorded (vendor, product, usage page).

@@ -18,7 +18,13 @@ pub enum SessionError {
     Open(openkeychron_hid::OpenError),
     Via(String),
     Keychron(String),
-    FixtureNotFinished { count: usize },
+    FixtureNotFinished {
+        count: usize,
+    },
+    Finalization {
+        operation: Box<Self>,
+        finalization: Box<Self>,
+    },
 }
 
 impl std::fmt::Display for SessionError {
@@ -34,6 +40,13 @@ impl std::fmt::Display for SessionError {
                 formatter,
                 "the session stopped before the end of the fixture; {count} recorded events \
                  were never reached"
+            ),
+            Self::Finalization {
+                operation,
+                finalization,
+            } => write!(
+                formatter,
+                "{operation}; also failed to finish the session: {finalization}"
             ),
         }
     }
@@ -89,17 +102,18 @@ pub fn list(fixture: Option<&Path>) -> Result<Vec<KeychronDevice>, SessionError>
 
 /// One device's VIA channel, ready for commands.
 #[derive(Debug)]
-pub struct Session {
+pub struct Session<T = HidapiTransport> {
     device: KeychronDevice,
-    link: Link,
+    link: Link<T>,
+    reply_timeout: Option<Duration>,
 }
 
 #[derive(Debug)]
-enum Link {
+enum Link<T> {
     Replay(ReplayTransport),
-    Hardware(HidapiTransport),
+    Hardware(T),
     Recording {
-        transport: RecordingTransport<HidapiTransport>,
+        transport: RecordingTransport<T>,
         path: PathBuf,
     },
 }
@@ -115,6 +129,7 @@ impl Session {
             return Ok(Self {
                 device: fixture_device(&fixture, path)?,
                 link: Link::Replay(ReplayTransport::new(fixture)),
+                reply_timeout: None,
             });
         }
 
@@ -127,11 +142,34 @@ impl Session {
             },
             None => Link::Hardware(transport),
         };
-        Ok(Self { device, link })
+        Ok(Self {
+            device,
+            link,
+            reply_timeout: None,
+        })
     }
+}
 
+impl<T: HidTransport> Session<T> {
     pub fn device(&self) -> &KeychronDevice {
         &self.device
+    }
+
+    pub fn with_reply_timeout(mut self, timeout: Option<Duration>) -> Self {
+        self.reply_timeout = timeout;
+        self
+    }
+
+    /// Keeps the command error even if saving its recording also fails.
+    pub fn complete<R>(self, result: Result<R, SessionError>) -> Result<R, SessionError> {
+        match (result, self.finish()) {
+            (Ok(output), Ok(())) => Ok(output),
+            (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
+            (Err(operation), Err(finalization)) => Err(SessionError::Finalization {
+                operation: Box::new(operation),
+                finalization: Box::new(finalization),
+            }),
+        }
     }
 
     /// Ends the session: a replay must have used every recorded event, and a recording is
@@ -165,7 +203,7 @@ impl Session {
     }
 }
 
-impl HidTransport for Session {
+impl<T: HidTransport> HidTransport for Session<T> {
     fn write(&mut self, report: &[u8]) -> Result<(), TransportError> {
         match &mut self.link {
             Link::Replay(transport) => transport.write(report),
@@ -175,6 +213,7 @@ impl HidTransport for Session {
     }
 
     fn read(&mut self, timeout: Duration) -> Result<Vec<u8>, TransportError> {
+        let timeout = self.reply_timeout.unwrap_or(timeout);
         match &mut self.link {
             Link::Replay(transport) => transport.read(timeout),
             Link::Hardware(transport) => transport.read(timeout),
@@ -256,10 +295,118 @@ fn fixture_device(fixture: &Fixture, path: &Path) -> Result<KeychronDevice, Sess
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::time::Duration;
 
-    use openkeychron_hid::KeychronDevice;
+    use openkeychron_hid::{
+        Event, Fixture, HidTransport, KeychronDevice, RecordingTransport, ReplayTransport,
+        TransportError,
+    };
 
-    use super::{SessionError, choose_device};
+    use super::{Link, Session, SessionError, choose_device};
+
+    #[derive(Debug)]
+    struct TimedReplay {
+        replay: ReplayTransport,
+        expected_timeout: Duration,
+    }
+
+    impl HidTransport for TimedReplay {
+        fn write(&mut self, report: &[u8]) -> Result<(), TransportError> {
+            self.replay.write(report)
+        }
+
+        fn read(&mut self, timeout: Duration) -> Result<Vec<u8>, TransportError> {
+            assert_eq!(timeout, self.expected_timeout);
+            self.replay.read(timeout)
+        }
+    }
+
+    #[test]
+    fn info_records_success_with_default_or_explicit_reply_wait() {
+        for reply_timeout in [None, Some(Duration::from_secs(5))] {
+            let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../fixtures/synthetic/cli-info.toml");
+            let fixture = Fixture::load(&fixture_path).unwrap();
+            let path = std::env::temp_dir().join(format!(
+                "openkeychron-success-info-{}-{}.toml",
+                std::process::id(),
+                reply_timeout.is_some()
+            ));
+            let transport = TimedReplay {
+                replay: ReplayTransport::new(fixture.clone()),
+                expected_timeout: reply_timeout.unwrap_or(Duration::from_millis(500)),
+            };
+            let session = Session {
+                device: device("synthetic", 0xd030),
+                link: Link::Recording {
+                    transport: RecordingTransport::new(transport),
+                    path: path.clone(),
+                },
+                reply_timeout,
+            };
+            let output = crate::query_info(session).unwrap();
+            assert_eq!(output.via_protocol_version, 12);
+            let recorded = Fixture::load(&path).unwrap();
+            assert_eq!(recorded.events, fixture.events);
+            std::fs::remove_file(&path).unwrap();
+        }
+    }
+
+    #[test]
+    fn info_saves_failed_exchanges_without_hiding_the_query_error() {
+        for failure in ["timeout", "wrong-reply", "keychron-timeout", "save-error"] {
+            let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../fixtures/synthetic/cli-info.toml");
+            let mut fixture = Fixture::load(&fixture_path).unwrap();
+            if failure == "keychron-timeout" {
+                fixture.events.truncate(10);
+                fixture.events[9] = Event::ReadTimeout;
+            } else {
+                fixture.events.truncate(2);
+                fixture.events[1] = if failure == "wrong-reply" {
+                    Event::Read {
+                        data: vec![0x02; 32],
+                    }
+                } else {
+                    Event::ReadTimeout
+                };
+            }
+            let path = std::env::temp_dir().join(format!(
+                "openkeychron-failed-info-{}-{failure}.toml",
+                std::process::id()
+            ));
+            let output_path = if failure == "save-error" {
+                path.join("missing.toml")
+            } else {
+                path
+            };
+            let transport = TimedReplay {
+                replay: ReplayTransport::new(fixture.clone()),
+                expected_timeout: Duration::from_secs(5),
+            };
+            let session = Session {
+                device: device("synthetic", 0xd030),
+                link: Link::Recording {
+                    transport: RecordingTransport::new(transport),
+                    path: output_path.clone(),
+                },
+                reply_timeout: Some(Duration::from_secs(5)),
+            };
+            let error = crate::query_info(session).unwrap_err().to_string();
+            if failure == "wrong-reply" {
+                assert!(error.contains("reply is for command"), "{error}");
+            } else {
+                assert!(error.contains("no input report arrived"), "{error}");
+            }
+            if failure == "save-error" {
+                assert!(error.contains("missing.toml"), "{error}");
+            } else {
+                let recorded = Fixture::load(&output_path).unwrap();
+                assert_eq!(recorded.events, fixture.events);
+                std::fs::remove_file(&output_path).unwrap();
+            }
+        }
+    }
 
     fn device(path: &str, product_id: u16) -> KeychronDevice {
         KeychronDevice {

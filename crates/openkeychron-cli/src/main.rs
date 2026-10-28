@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use openkeychron_hid::KeychronDevice;
+use openkeychron_hid::{HidTransport, KeychronDevice};
 use openkeychron_keychron::{KNOWN_PROTOCOL_VERSION, Keychron, NotReported};
 use openkeychron_via::Via;
 use serde::Serialize;
@@ -45,7 +45,11 @@ enum Command {
     /// List connected Keychron devices that have a VIA interface.
     List,
     /// Print the VIA protocol and firmware values of the one connected device. Only reads.
-    Info,
+    Info {
+        /// Wait up to this many milliseconds per reply (1–60000; default: 500).
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=60_000))]
+        reply_timeout_ms: Option<u64>,
+    },
     /// Read or change the RGB effect, speed, brightness and colour. Writes only over a USB cable.
     Rgb {
         #[command(subcommand)]
@@ -95,7 +99,7 @@ fn main() -> ExitCode {
 fn run(cli: &Cli) -> Result<(), SessionError> {
     match &cli.command {
         Command::List => list(cli),
-        Command::Info => info(cli),
+        Command::Info { reply_timeout_ms } => info(cli, *reply_timeout_ms),
         Command::Rgb { action } => rgb::run(
             action,
             cli.fixture.as_deref(),
@@ -139,25 +143,15 @@ fn list(cli: &Cli) -> Result<(), SessionError> {
     Ok(())
 }
 
-fn info(cli: &Cli) -> Result<(), SessionError> {
+fn info(cli: &Cli, reply_timeout_ms: Option<u64>) -> Result<(), SessionError> {
     let session = Session::start(
         cli.fixture.as_deref(),
         cli.record.as_deref(),
         cli.device.as_deref(),
-    )?;
+    )?
+    .with_reply_timeout(reply_timeout_ms.map(Duration::from_millis));
     let device = session.device().clone();
-    let mut via = Via::new(session);
-    let mut output = read_info(&mut via, &device)
-        .map_err(|error| SessionError::via(&error, device.is_receiver))?;
-    let mut keychron = Keychron::new(via.into_transport());
-    match keychron.firmware_version()? {
-        Ok(firmware) => {
-            output.keychron_firmware_version = Some(firmware.version);
-            output.keychron_firmware_build_date = Some(firmware.build_date);
-        }
-        Err(reason) => output.keychron_firmware_not_reported = Some(not_reported(reason)),
-    }
-    keychron.into_transport().finish()?;
+    let output = query_info(session)?;
 
     if cli.json {
         print_json(&output)?;
@@ -191,6 +185,25 @@ fn info(cli: &Cli) -> Result<(), SessionError> {
     Ok(())
 }
 
+fn query_info<T: HidTransport>(session: Session<T>) -> Result<InfoOutput, SessionError> {
+    let device = session.device().clone();
+    let mut via = Via::new(session);
+    let result =
+        read_info(&mut via, &device).map_err(|error| SessionError::via(&error, device.is_receiver));
+    let mut keychron = Keychron::new(via.into_transport());
+    let result = result.and_then(|mut output| {
+        match keychron.firmware_version()? {
+            Ok(firmware) => {
+                output.keychron_firmware_version = Some(firmware.version);
+                output.keychron_firmware_build_date = Some(firmware.build_date);
+            }
+            Err(reason) => output.keychron_firmware_not_reported = Some(not_reported(reason)),
+        }
+        Ok(output)
+    });
+    keychron.into_transport().complete(result)
+}
+
 fn not_reported(reason: NotReported) -> String {
     match reason {
         NotReported::NoKeychronProtocol => {
@@ -202,8 +215,8 @@ fn not_reported(reason: NotReported) -> String {
     }
 }
 
-fn read_info(
-    via: &mut Via<Session>,
+fn read_info<T: HidTransport>(
+    via: &mut Via<T>,
     device: &KeychronDevice,
 ) -> Result<InfoOutput, openkeychron_via::ViaError> {
     Ok(InfoOutput {

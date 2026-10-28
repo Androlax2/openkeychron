@@ -27,6 +27,28 @@ mod tests {
     }
 
     #[test]
+    fn info_accepts_a_longer_reply_wait_with_a_fixture() {
+        let path = fixture("cli-info.toml");
+        let output = openkeychron(&[
+            "info",
+            "--reply-timeout-ms",
+            "5000",
+            "--fixture",
+            path.to_str().unwrap(),
+        ]);
+        assert!(output.status.success(), "{}", stderr(&output));
+    }
+
+    #[test]
+    fn info_refuses_out_of_range_reply_wait_before_opening_hardware() {
+        for timeout in ["0", "60001"] {
+            let output = openkeychron(&["info", "--reply-timeout-ms", timeout]);
+            assert!(!output.status.success());
+            assert!(stderr(&output).contains("1..=60000"), "{}", stderr(&output));
+        }
+    }
+
+    #[test]
     fn info_replays_the_real_v5_max_cable_recording() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../fixtures/v5-max/detect-cable.toml");
