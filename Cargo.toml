@@ -17,6 +17,7 @@ repository = "https://github.com/Androlax2/openkeychron"
 description = "Native, local-first alternative to Keychron Launcher"
 
 [workspace.dependencies]
+openkeychron-hid = { path = "crates/openkeychron-hid", version = "0.0.0" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 toml = "1"
