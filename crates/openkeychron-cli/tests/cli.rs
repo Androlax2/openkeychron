@@ -234,4 +234,73 @@ mod tests {
         assert!(!output.status.success());
         assert!(stderr(&output).contains("--backup"), "{}", stderr(&output));
     }
+
+    #[test]
+    fn rgb_get_prints_the_lighting_values() {
+        let path = fixture("cli-rgb-get.toml");
+        let output = openkeychron(&["rgb", "get", "--fixture", path.to_str().unwrap()]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        let text = stdout(&output);
+        assert!(text.contains("Brightness: 254"), "{text}");
+        assert!(
+            text.contains("Colour:     hue 170, saturation 255"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn rgb_set_brightness_saves_a_backup_and_prints_the_restore_value() {
+        let path = fixture("cli-rgb-set-brightness.toml");
+        let backup = std::env::temp_dir().join(format!(
+            "openkeychron-rgb-backup-{}.json",
+            std::process::id()
+        ));
+        let output = openkeychron(&[
+            "rgb",
+            "set",
+            "--backup",
+            backup.to_str().unwrap(),
+            "--fixture",
+            path.to_str().unwrap(),
+            "brightness",
+            "128",
+        ]);
+        let saved = std::fs::read_to_string(&backup);
+        std::fs::remove_file(&backup).ok();
+        assert!(output.status.success(), "{}", stderr(&output));
+        let saved: serde_json::Value = serde_json::from_str(&saved.unwrap()).unwrap();
+        assert_eq!(saved["brightness"], 254);
+        // 255 is the value that makes the keyboard store 254 again.
+        assert!(
+            stdout(&output).contains("brightness 255"),
+            "{}",
+            stdout(&output)
+        );
+    }
+
+    #[test]
+    fn rgb_set_refuses_to_write_through_a_receiver() {
+        let path = fixture("cli-info.toml");
+        let backup = std::env::temp_dir().join(format!(
+            "openkeychron-rgb-unused-{}.json",
+            std::process::id()
+        ));
+        let output = openkeychron(&[
+            "rgb",
+            "set",
+            "--backup",
+            backup.to_str().unwrap(),
+            "--fixture",
+            path.to_str().unwrap(),
+            "speed",
+            "10",
+        ]);
+        assert!(!output.status.success());
+        assert!(
+            stderr(&output).contains("only written over a USB cable"),
+            "{}",
+            stderr(&output)
+        );
+        assert!(!backup.exists());
+    }
 }

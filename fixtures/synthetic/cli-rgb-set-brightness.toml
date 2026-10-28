@@ -1,0 +1,67 @@
+# Hand-written, not recorded: `openkeychron rgb set ... brightness 128` on a V5 Max over cable:
+# reads the previous values, sets 128, reads back 127 (firmware scaling), saves.
+# Bytes follow quantum/via.c (via_qmk_rgb_matrix_*). Real recordings need the cable session (#20).
+format_version = 1
+
+[device]
+name = "Keychron V5 Max"
+vendor_id = 0x3434
+product_id = 0x0951
+usage_page = 0xff60
+usage = 0x61
+
+[[event]]
+kind = "write"
+data = "08 03 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "08 03 01 fe 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "08 03 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "08 03 02 06 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "08 03 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "08 03 03 7f 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "08 03 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "08 03 04 aa ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "07 03 01 80 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "07 03 01 80 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "08 03 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "08 03 01 7f 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "09 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "09 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"

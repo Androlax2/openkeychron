@@ -126,7 +126,37 @@ Sub-commands from the enum in `common/rgb/keychron_rgb.c`. The V5 Max has
 
 The plain RGB effect, brightness, speed and colour are **not** Keychron commands: they are VIA's
 lighting values (`id_custom_get_value` / `id_custom_set_value` on channel
-`id_qmk_rgb_matrix_channel`, `quantum/via.h` at the repository root). That matters for #28.
+`id_qmk_rgb_matrix_channel`, `quantum/via.h` at the repository root). #28 implements them in
+`openkeychron-via` (`crates/openkeychron-via/src/rgb.rs`).
+
+### VIA lighting: persistence and read-back limits
+
+From `quantum/via.c` (`via_qmk_rgb_matrix_get_value`, `_set_value`, `_save`) and
+`lib/lib8tion/scale8.h`, both at the repository root:
+
+| Command | Bytes | Behaviour |
+|---|---|---|
+| `id_custom_get_value` | `08 03 <value>` | Reply `08 03 <value> <data…>`. Values: 1 brightness, 2 effect (0 = off), 3 speed, 4 hue + saturation |
+| `id_custom_set_value` | `07 03 <value> <data…>` | **RAM only** (`*_noeeprom`); the request is echoed back |
+| `id_custom_save` | `09 03` | Writes EEPROM, **but only if exactly one value was set since the previous save**, then clears that record |
+
+Limits the host has to live with:
+
+- **One value per save.** Two sets before a save make the firmware save neither, silently. So
+  each change is set, read back, then saved on its own.
+- **Unsaved changes by another program block our save, undetectably.** The firmware's record
+  of what changed lives in RAM from power-on. If VIA, Keychron Launcher or anything else set a
+  lighting value without saving, our next save writes nothing, and the host cannot tell. The
+  change still applies until power-off. Unplugging the keyboard clears the record.
+- **Brightness is lossy.** Setting `v` stores `(v × 255) >> 8` (`scale8` without the "fixed"
+  rounding, with `RGB_MATRIX_MAXIMUM_BRIGHTNESS` = 255 on the V5 Max), so 255 reads back as 254
+  and 128 as 127. The read-back expects exactly that; a stored 255 (possible from the factory
+  default) cannot be set again through VIA.
+- **Effect numbers depend on the firmware build**, and out-of-range numbers are clamped rather
+  than refused. A read-back that differs means nothing is saved; the RAM change stays until
+  power-off or until the previous value is set again.
+- **No feature bit** advertises the lighting channel. A firmware without it replies
+  `id_unhandled`, so `rgb set` reads all values first and fails before writing anything.
 
 ## Firmware bugs a host must work around
 
