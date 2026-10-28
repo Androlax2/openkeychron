@@ -3,11 +3,12 @@
 Research for #15: how a host reaches a 2.4 GHz V5 Max, and which commands can work through
 the Keychron Link receiver instead of a USB cable.
 
-**Short answer:** the path exists in Keychron's firmware design, but the public V5 Max
-source compiles it out. Whether the firmware on Theo's keyboard has it is unknown. The first
-hardware recording (#20) can show that it works; it cannot prove that it is off (see
-[How #20 tests it](#how-20-tests-it)). Until a receiver read has been confirmed, treat the
-**USB cable as the only supported path** and the receiver as "to be confirmed".
+**Short answer:** receiver-local metadata reads work, but keyboard VIA queries do not.
+The official V5 Max ISO v1.1.0 image matching Theo's reported build timestamp lacks the
+wireless raw-HID receive path (see [firmware evidence](#matching-official-keyboard-image)).
+This is a concrete blocker in that image, not a byte-for-byte identification of the installed
+firmware or a claim that the hardware can never support configuration. Treat the **USB cable
+as the only supported keyboard-configuration path**; receiver writes remain blocked.
 
 Sources, read on 2026-10-28:
 
@@ -22,7 +23,7 @@ Sources, read on 2026-10-28:
 ## The two links
 
 ```
-host ──USB──▶ Keychron Link (3434:d030) ──2.4 GHz──▶ LKBT51 module ──UART──▶ STM32 (QMK)
+host ──USB──▶ Keychron Link (3434:d030) ──2.4 GHz──▶ LKBT51 module ──SPI──▶ STM32 (QMK)
 host ──USB cable──────────────────────────────────────────────────────────▶ STM32 (QMK)
 ```
 
@@ -95,8 +96,9 @@ Flashing the keyboard itself (STM32 DFU) is cable-only in every case and out of 
 
 ## How #20 tests it
 
-Both steps send only VIA `get protocol version` (`01` followed by 31 zero bytes), which reads
-and changes nothing. Chrome, Launcher and VIA are closed, and each session is recorded.
+The first request in both sessions is VIA `get protocol version` (`01` followed by 31 zero
+bytes), which reads and changes nothing. On success, `info` continues with its other metadata
+queries. Chrome, Launcher and VIA are closed, and each session is recorded.
 
 1. **Cable reference first.** With the keyboard on the USB cable, send the command to its raw
    HID interface. A valid reply (`01 00 0c …`) proves the command and our transport work. If
@@ -121,3 +123,96 @@ verified by reading it back.**
   a successful read through the receiver is not enough.
 - A receiver session identifies the keyboard from the protocol-version reply (bytes 3–8), not
   from the receiver's USB IDs.
+
+## Receiver-local reads, verified on 2026-10-29
+
+The receiver has its own commands on the same `0xFF60/0x61` interface, distinct from
+the `0xB1`/`0xB2` **report IDs on its other interface**. Launcher sends these commands as
+32-byte payloads with report ID zero, followed by the ordinary keyboard VIA query:
+
+| Payload byte 0 (remaining request bytes zero) | Launcher operation | Observed result |
+|---|---|---|
+| `0xB1` | `FR_GET_PROTOCOL_VERSION` | `b1 01 00 00 00 …`: receiver protocol 1, feature bytes zero |
+| `0xB2` | `FR_GET_STATE` | `b2 01 34 34 51 09 01 …`: VID `0x3434`, PID `0x0951`, connected flag 1 |
+| `0xB3` | `FR_GET_FW_VERSION` | `d.3.0 Jun  7 2024 12:32:18` |
+| `0x01` | Keyboard VIA protocol version | No reply within five seconds |
+
+The state reply's VID and PID are little-endian at bytes 2–3 and 4–5; connected is byte 6.
+It identifies the receiver's connected device, **not** a successful round trip to the
+keyboard's VIA handler. It does not authorize receiver writes.
+
+Source: [Launcher bundle](https://launcher.keychron.com/main.9e74017f20f1eca7.js), modules
+`88493` (command constants) and `9789` (receiver client and initialization order).
+Bundle SHA256: `0e53d4db82a87bae42599c16661de233fc12a88d7e2de938fd268f609cb7ea84`.
+The receiver client's initialization reads protocol, state and firmware, then keyboard VIA
+version and JSON version. There is no forwarding-enable write in that sequence. Its gamepad
+control and DFU commands are separate operations and were not sent.
+
+Approved host request `d21ce7b6c0ca` sent the four requests above to `/dev/hidraw12`, after
+checking sysfs for receiver `3434:d030` and the VIA descriptor. A standard-library Python
+probe bypassed our Rust HID transport; two hardware-free tests checked its exact request
+bytes and timeout recording. The raw capture is retained locally in
+`.handoff/receiver-probe-result.jsonl`; no serial, keypress, keymap or macro data is present.
+
+This confirms USB access and receiver-local metadata work. It also shows that the three
+initialization reads alone do not make the keyboard answer VIA. It does **not** establish
+whether the request reached the wireless module or QMK, nor rule out pairing/module state.
+
+Keychron's [receiver release notes](https://www.keychron.com/pages/how-to-flash-the-firmware-for-the-keychron-receiver)
+explicitly list wireless VIA/Launcher support for `d.3.0/c.3.0`, conditional on keyboard QMK
+support. The official Type-A download is named
+`keychron_link_type_d_fw_d.3.0_2406071232.kfw`, matching the receiver's version and build minute.
+Thus a June build date is not evidence that this receiver predates the feature. The same
+notes require re-pairing after an update; no re-pairing or update was performed here.
+
+## Matching official keyboard image
+
+The cable reference reports keyboard firmware `v1.1.0`, built `2025-03-17-17:29:02`.
+Keychron's [V/V Max firmware page](https://www.keychron.com/pages/firmware-and-json-files-of-the-keychron-qmk-v-and-v-max-series-keyboards)
+links this [official V5 Max ISO image](https://cdn.shopify.com/s/files/1/0059/0630/1017/files/v5_max_iso_encoder_v1.1.0_2503171731.bin?v=1743389929):
+
+- Filename: `v5_max_iso_encoder_v1.1.0_2503171731.bin`.
+- Size: 105188 bytes.
+- SHA256: `6678bb353f9c67fa9594fc57d51163e9cb5e96d5171e9781bf5f98fcf3ae42d0`.
+- Embedded build string at file offset `0x180CB`: `2025-03-17-17:29:02`, exactly matching
+  the cable reply. The filename's minute is not the embedded build time.
+
+The image was downloaded for **static inspection only**, never flashed or executed.
+LLVM's binary-to-ELF conversion and Thumb disassembly used existing tools:
+
+```sh
+llvm-objcopy -I binary -O elf32-littlearm --binary-architecture=arm firmware.bin firmware.elf
+llvm-objdump --triple=thumbv7em-none-eabi --mcpu=cortex-m4 --disassemble-all firmware.elf
+```
+
+Here `firmware.bin` names the downloaded image, not a device. Addresses below are file
+offsets; runtime flash addresses add `0x08000000`. Independent read-only review confirmed:
+
+1. `0x854C` enqueues three-byte wireless events into a 16-slot ring at RAM `0x20002BAF`;
+   head/tail are `0x20002BDF`/`0x20002BE0`. `0x8940` consumes the same ring.
+2. At `0x8AEC`, the dispatcher subtracts one from the event ID; `0x8AF2` compares against
+   ten and `0x8AF4` branches on unsigned higher. The eleven-entry table at
+   `0x8B00`–`0x8B28` therefore handles only events 1–11. The newer source's raw-HID event
+   is 12; it has no handler here.
+3. Task `0x8B58` invokes the active transport callback, then dispatcher `0x8940`.
+   Startup's initialized-data mapping identifies that callback as module parser `0x9550`.
+4. Crucially, the module parser's validated-packet dispatch at `0x973E`–`0x9784` handles
+   `0xA1`, `0xA2`, `0xA3`, `0xB0` and `0xB4`. Raw-HID RX `0x92` falls through to the
+   return at `0x9764`: there is no raw-data copy, enqueue or direct VIA call on that path.
+
+**Conclusion for this official image:** the expected LKBT51 wireless raw-HID-to-VIA bridge
+is absent. Host-side initialization cannot supply that missing keyboard-firmware behavior.
+Receiver metadata can work while keyboard configuration remains unavailable.
+
+Do not describe this image as definitely "compiled without `WILRESS_RAW_ENABLE`": its
+three-byte events differ from the pointer-bearing event structure in the newer pinned public
+source. It may predate those additions instead. The conclusion rests on the actual parser
+and dispatcher, not an assumed build flag.
+
+**Limits:** the installed keyboard was not read back or hashed. An exact reported version
+and build-time match is strong evidence, not proof of identical bytes. The traced ingress
+does not implement wireless VIA; this is not an exhaustive proof against every undocumented
+protocol. The keyboard's wireless-module version and pairing state are also unverified.
+No firmware change, reset, re-pairing or setting write is authorized by these findings.
+Receiver configuration is therefore blocked pending a separately reviewed firmware/support
+investigation, not declared physically impossible.
