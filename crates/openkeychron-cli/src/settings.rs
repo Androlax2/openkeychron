@@ -120,9 +120,10 @@ pub fn run(
     action: &SettingsAction,
     fixture: Option<&Path>,
     record: Option<&Path>,
+    device: Option<&Path>,
     json: bool,
 ) -> Result<(), SessionError> {
-    let session = Session::start(fixture, record)?;
+    let session = Session::start(fixture, record, device)?;
     if matches!(action, SettingsAction::Set { .. }) && session.device().is_receiver {
         return Err(SessionError::Usage(
             "settings are only written over a USB cable: writes through a receiver are not \

@@ -105,7 +105,11 @@ enum Link {
 }
 
 impl Session {
-    pub fn start(fixture: Option<&Path>, record: Option<&Path>) -> Result<Self, SessionError> {
+    pub fn start(
+        fixture: Option<&Path>,
+        record: Option<&Path>,
+        device: Option<&Path>,
+    ) -> Result<Self, SessionError> {
         if let Some(path) = fixture {
             let fixture = Fixture::load(path)?;
             return Ok(Self {
@@ -114,7 +118,7 @@ impl Session {
             });
         }
 
-        let device = only_device(openkeychron_hid::list_keychron_devices()?)?;
+        let device = choose_device(openkeychron_hid::list_keychron_devices()?, device)?;
         let transport = openkeychron_hid::open(&device)?;
         let link = match record {
             Some(path) => Link::Recording {
@@ -179,17 +183,46 @@ impl HidTransport for Session {
     }
 }
 
-/// Commands that talk to a device need exactly one; picking between several is not built yet.
-fn only_device(mut devices: Vec<KeychronDevice>) -> Result<KeychronDevice, SessionError> {
+/// The device a command talks to: the one at `wanted` (a path from `openkeychron list`), or
+/// the only one connected.
+fn choose_device(
+    mut devices: Vec<KeychronDevice>,
+    wanted: Option<&Path>,
+) -> Result<KeychronDevice, SessionError> {
+    if let Some(wanted) = wanted {
+        let found = devices
+            .iter()
+            .position(|device| Path::new(&device.path) == wanted);
+        return match found {
+            Some(index) => Ok(devices.swap_remove(index)),
+            None => Err(SessionError::Usage(format!(
+                "{} is not a Keychron VIA interface; found: {}",
+                wanted.display(),
+                listed_paths(&devices)
+            ))),
+        };
+    }
     match devices.len() {
         1 => Ok(devices.remove(0)),
         0 => Err(SessionError::Usage(
             "no Keychron device with a VIA interface found; run `openkeychron list`".to_owned(),
         )),
         count => Err(SessionError::Usage(format!(
-            "{count} Keychron devices found; connect only one (see `openkeychron list`)"
+            "{count} Keychron devices found ({}); choose one with --device <PATH>",
+            listed_paths(&devices)
         ))),
     }
+}
+
+fn listed_paths(devices: &[KeychronDevice]) -> String {
+    if devices.is_empty() {
+        return "none".to_owned();
+    }
+    devices
+        .iter()
+        .map(|device| device.path.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// The device a fixture was recorded from, as `list` would have shown it. A fixture from
@@ -218,4 +251,76 @@ fn fixture_device(fixture: &Fixture, path: &Path) -> Result<KeychronDevice, Sess
                 identity.usage
             ))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use openkeychron_hid::KeychronDevice;
+
+    use super::{SessionError, choose_device};
+
+    fn device(path: &str, product_id: u16) -> KeychronDevice {
+        KeychronDevice {
+            name: Some("test".to_owned()),
+            vendor_id: 0x3434,
+            product_id,
+            path: path.to_owned(),
+            is_receiver: product_id == 0xd030,
+        }
+    }
+
+    fn receiver_and_keyboard() -> Vec<KeychronDevice> {
+        vec![
+            device("/dev/hidraw12", 0xd030),
+            device("/dev/hidraw20", 0x0951),
+        ]
+    }
+
+    #[test]
+    fn device_picks_the_listed_interface_with_that_path() {
+        let chosen = choose_device(receiver_and_keyboard(), Some(Path::new("/dev/hidraw20")));
+        assert_eq!(chosen.unwrap().product_id, 0x0951);
+    }
+
+    #[test]
+    fn selecting_a_receiver_preserves_its_write_refusal_identity() {
+        let chosen = choose_device(receiver_and_keyboard(), Some(Path::new("/dev/hidraw12")));
+        assert!(chosen.unwrap().is_receiver);
+    }
+
+    #[test]
+    fn device_refuses_a_path_that_is_not_listed_and_names_the_listed_ones() {
+        let error = choose_device(receiver_and_keyboard(), Some(Path::new("/dev/hidraw19")))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("/dev/hidraw19 is not a Keychron VIA interface"),
+            "{error}"
+        );
+        assert!(error.contains("/dev/hidraw12, /dev/hidraw20"), "{error}");
+    }
+
+    #[test]
+    fn without_device_a_single_interface_is_chosen() {
+        let chosen = choose_device(vec![device("/dev/hidraw20", 0x0951)], None);
+        assert_eq!(chosen.unwrap().path, "/dev/hidraw20");
+    }
+
+    #[test]
+    fn without_device_several_interfaces_ask_for_device() {
+        let error = choose_device(receiver_and_keyboard(), None)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("choose one with --device <PATH>"), "{error}");
+    }
+
+    #[test]
+    fn without_device_none_connected_is_an_error() {
+        assert!(matches!(
+            choose_device(vec![], None),
+            Err(SessionError::Usage(_))
+        ));
+    }
 }

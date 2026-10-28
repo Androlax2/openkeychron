@@ -99,6 +99,12 @@ cargo run -p openkeychron-cli -- info --fixture fixtures/synthetic/cli-info.toml
 
 ## Talking to the real keyboard (Linux)
 
+When both a keyboard and receiver are connected, `openkeychron list` shows their paths.
+Pass the chosen path with `--device <PATH>` to `info`, `settings` or `rgb`. Without it,
+commands still require exactly one device. Paths can change after reconnecting, so list
+again rather than reusing an old path. Selecting a receiver does not bypass write refusal.
+`--device` cannot be combined with `--fixture` or used with `list`.
+
 Not possible yet: device discovery is #16. A normal user also needs the udev rule in
 `packaging/linux/`; what it opens, and how to install, check and remove it, is in
 [`INSTALL-linux.md`](INSTALL-linux.md). Close Chrome, Keychron Launcher and VIA before any

@@ -27,6 +27,35 @@ mod tests {
     }
 
     #[test]
+    fn device_and_fixture_cannot_be_combined() {
+        let path = fixture("cli-info.toml");
+        let output = openkeychron(&[
+            "info",
+            "--device",
+            "/dev/not-opened",
+            "--fixture",
+            path.to_str().unwrap(),
+        ]);
+        assert!(!output.status.success());
+        assert!(
+            stderr(&output).contains("cannot be used with"),
+            "{}",
+            stderr(&output)
+        );
+    }
+
+    #[test]
+    fn list_refuses_device_without_enumerating_hardware() {
+        let output = openkeychron(&["list", "--device", "/dev/not-opened"]);
+        assert!(!output.status.success());
+        assert!(
+            stderr(&output).contains("`list` shows all devices"),
+            "{}",
+            stderr(&output)
+        );
+    }
+
+    #[test]
     fn info_prints_the_via_values_from_a_fixture() {
         let path = fixture("cli-info.toml");
         let output = openkeychron(&["info", "--fixture", path.to_str().unwrap()]);
