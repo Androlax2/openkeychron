@@ -4,9 +4,10 @@ Research for #15: how a host reaches a 2.4 GHz V5 Max, and which commands can wo
 the Keychron Link receiver instead of a USB cable.
 
 **Short answer:** the path exists in Keychron's firmware design, but the public V5 Max
-source compiles it out. Whether the firmware on Theo's keyboard has it is unknown until the
-first hardware recording (#20). Until then, treat the **USB cable as the only supported path**
-and the receiver as "to be confirmed".
+source compiles it out. Whether the firmware on Theo's keyboard has it is unknown. The first
+hardware recording (#20) can show that it works; it cannot prove that it is off (see
+[How #20 tests it](#how-20-tests-it)). Until a receiver read has been confirmed, treat the
+**USB cable as the only supported path** and the receiver as "to be confirmed".
 
 Sources, read on 2026-10-28:
 
@@ -72,7 +73,7 @@ Launcher's own page says: "Connect your device using a cable or 2.4G receiver (s
 support wired mode)."
 
 The release build on the keyboard may set `WILRESS_RAW_ENABLE` even though the public source
-does not. Only the hardware can settle it.
+does not. Only a reply from the keyboard itself can show it.
 
 ## Commands: cable vs receiver
 
@@ -92,25 +93,31 @@ Even with wireless raw HID on, the firmware treats a few commands differently by
 Flashing the keyboard itself (STM32 DFU) is cable-only in every case and out of scope until
 #40.
 
-## How #20 settles it
+## How #20 tests it
 
-With the keyboard on the receiver, and Chrome, Launcher and VIA closed, the CLI sends VIA
-`get protocol version` (`01` followed by 31 zero bytes) to interface 1.3 and records the
-session:
+Both steps send only VIA `get protocol version` (`01` followed by 31 zero bytes), which reads
+and changes nothing. Chrome, Launcher and VIA are closed, and each session is recorded.
 
-| Result | Meaning | What we do |
+1. **Cable reference first.** With the keyboard on the USB cable, send the command to its raw
+   HID interface. A valid reply (`01 00 0c …`) proves the command and our transport work. If
+   this step fails, stop: no receiver result can be interpreted until it passes.
+2. **Then the receiver.** With the keyboard on 2.4 GHz, send the same command to the
+   receiver's interface 1.3.
+
+| Receiver result | What it tells us | What we do |
 |---|---|---|
-| A reply whose bytes 3–6 are `34 34 09 51` (VID `0x3434`, V5 Max ISO PID `0x0951`) | The shipped firmware has wireless raw HID, and the keyboard answered | Support the receiver; record more fixtures over it |
-| A reply with other bytes 3–8, or zeros | The receiver or module answered for itself | Investigate before sending any write |
-| A timeout | Wireless raw HID is off in the shipped firmware | Cable only; the CLI says so when it sees the receiver alone |
+| A reply whose bytes 3–6 are `34 34 09 51` (VID `0x3434`, V5 Max ISO PID `0x0951`) | The reply carries the V5 Max ISO's identity, which the public source adds only on the keyboard (`keychron_raw_hid.c`, non-USB source). Strong evidence that reads reach the keyboard's firmware | Receiver reads can be supported. Receiver writes stay off until a separate write and read-back test passes |
+| A reply with other bytes 3–8, or zeros | Something replied, but its identity is unverified: the bytes do not show what produced them | Treat the receiver as unsupported. No writes. Investigate |
+| A timeout | Inconclusive. Wireless raw HID may be compiled out of the shipped firmware, or the request or reply may have been lost to the radio link, the receiver, the module, or our transport. With the cable reference passing, it shows only that the receiver path did not work in this session | Treat the receiver as unsupported. No writes. Repeat once the link is known to be up before concluding anything about the firmware |
 
-Then the same command over the USB cable, also recorded, gives the reference answer.
-`get protocol version` only reads, so it is safe to send.
+In every case, **nothing is written through the receiver until a receiver write has been
+verified by reading it back.**
 
 ## Consequences for the code
 
 - Discovery (#16) lists both the receiver's interface 1.3 and a cable-connected V5 Max
   (`3434:0951` for ISO, `3434:0950` for ANSI), and says which is which.
-- Until #20 confirms the receiver, writes go only over the cable.
+- Writes go only over the cable until a receiver write has been verified by reading it back;
+  a successful read through the receiver is not enough.
 - A receiver session identifies the keyboard from the protocol-version reply (bytes 3–8), not
   from the receiver's USB IDs.
