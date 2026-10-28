@@ -229,6 +229,7 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "openkeychron-hid",
+ "openkeychron-keychron",
  "openkeychron-via",
  "serde",
  "serde_json",
@@ -247,6 +248,10 @@ dependencies = [
 [[package]]
 name = "openkeychron-keychron"
 version = "0.0.0"
+dependencies = [
+ "openkeychron-hid",
+ "thiserror",
+]
 
 [[package]]
 name = "openkeychron-via"

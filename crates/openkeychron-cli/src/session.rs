@@ -17,13 +17,16 @@ pub enum SessionError {
     Discovery(openkeychron_hid::DiscoveryError),
     Open(openkeychron_hid::OpenError),
     Via(String),
+    Keychron(String),
     FixtureNotFinished { count: usize },
 }
 
 impl std::fmt::Display for SessionError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Usage(message) | Self::Via(message) => formatter.write_str(message),
+            Self::Usage(message) | Self::Via(message) | Self::Keychron(message) => {
+                formatter.write_str(message)
+            }
             Self::Fixture(error) => error.fmt(formatter),
             Self::Discovery(error) => error.fmt(formatter),
             Self::Open(error) => error.fmt(formatter),
@@ -45,6 +48,12 @@ impl From<FixtureError> for SessionError {
 impl From<openkeychron_hid::DiscoveryError> for SessionError {
     fn from(error: openkeychron_hid::DiscoveryError) -> Self {
         Self::Discovery(error)
+    }
+}
+
+impl From<openkeychron_keychron::KeychronError> for SessionError {
+    fn from(error: openkeychron_keychron::KeychronError) -> Self {
+        Self::Keychron(error.to_string())
     }
 }
 
