@@ -1,6 +1,6 @@
 //! VIA command and value IDs, from `enum via_command_id` and `enum via_keyboard_value_id` in
 //! <https://github.com/Keychron/qmk_firmware/blob/2b493ff95f2665db719b1e95c91babb5036e72f3/quantum/via.h>.
-//! Only the read-only commands implemented so far are listed.
+//! Only the commands implemented so far are listed.
 
 /// Size of every VIA request and reply (`RAW_EPSIZE`).
 pub const REPORT_LEN: usize = 32;
@@ -13,6 +13,9 @@ pub(crate) const UNHANDLED: u8 = 0xFF;
 pub(crate) enum Command {
     GetProtocolVersion,
     GetKeyboardValue,
+    CustomSetValue,
+    CustomGetValue,
+    CustomSave,
 }
 
 impl Command {
@@ -20,6 +23,9 @@ impl Command {
         match self {
             Self::GetProtocolVersion => 0x01,
             Self::GetKeyboardValue => 0x02,
+            Self::CustomSetValue => 0x07,
+            Self::CustomGetValue => 0x08,
+            Self::CustomSave => 0x09,
         }
     }
 }

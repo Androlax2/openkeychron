@@ -32,6 +32,19 @@ pub enum ViaError {
 
     #[error("asked for keyboard value 0x{expected:02x}, the reply is for value 0x{actual:02x}")]
     WrongValue { expected: u8, actual: u8 },
+
+    #[error(
+        "asked for lighting channel {expected} value 0x{value:02x}, the reply is for channel {channel} value 0x{actual:02x}"
+    )]
+    WrongLightingValue {
+        expected: u8,
+        value: u8,
+        channel: u8,
+        actual: u8,
+    },
+
+    #[error("set {written}, but the keyboard now reports {read}; nothing was saved")]
+    ReadBackMismatch { written: String, read: String },
 }
 
 impl<T: HidTransport> Via<T> {
@@ -81,7 +94,7 @@ impl<T: HidTransport> Via<T> {
     }
 
     /// Sends one request and checks the reply belongs to it.
-    fn exchange(
+    pub(crate) fn exchange(
         &mut self,
         command: Command,
         arguments: &[u8],

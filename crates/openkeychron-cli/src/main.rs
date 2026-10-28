@@ -1,5 +1,6 @@
 //! openkeychron command-line tool.
 
+mod rgb;
 mod session;
 mod settings;
 
@@ -40,6 +41,11 @@ enum Command {
     List,
     /// Print the VIA protocol and firmware values of the one connected device. Only reads.
     Info,
+    /// Read or change the RGB effect, speed, brightness and colour. Writes only over a USB cable.
+    Rgb {
+        #[command(subcommand)]
+        action: rgb::RgbAction,
+    },
     /// Read or change debounce and Snap Click. Writes only over a USB cable.
     Settings {
         #[command(subcommand)]
@@ -80,6 +86,12 @@ fn run(cli: &Cli) -> Result<(), SessionError> {
     match &cli.command {
         Command::List => list(cli),
         Command::Info => info(cli),
+        Command::Rgb { action } => rgb::run(
+            action,
+            cli.fixture.as_deref(),
+            cli.record.as_deref(),
+            cli.json,
+        ),
         Command::Settings { action } => settings::run(
             action,
             cli.fixture.as_deref(),
