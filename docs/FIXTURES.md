@@ -49,8 +49,8 @@ into a macro.
 
 `RecordingTransport` wraps the real transport and keeps every report that crossed it;
 `into_fixture(device)` turns the session into a `Fixture` and `Fixture::save` writes it.
-The CLI's `--record <file>` option (issue #19) is the intended way to record. Recordings
-need the real keyboard, so they are `needs-hardware` issues for Theo.
+The CLI records with `--record <file>`, for example `openkeychron info --record detect.toml`.
+Recordings need the real keyboard, so they are `needs-hardware` issues for Theo.
 
 ## Reviewing a fixture
 

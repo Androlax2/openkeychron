@@ -90,8 +90,12 @@ Protocol code is tested by replaying recorded HID traffic; see [`FIXTURES.md`](F
 cargo test -p openkeychron-hid replay
 ```
 
-replays `fixtures/synthetic/via-protocol-version.toml` through `ReplayTransport`. The CLI's
-`--fixture <file>` option (#19) will run any command against a recording the same way.
+replays `fixtures/synthetic/via-protocol-version.toml` through `ReplayTransport`. The CLI runs
+any command against a recording the same way:
+
+```sh
+cargo run -p openkeychron-cli -- info --fixture fixtures/synthetic/cli-info.toml
+```
 
 ## Talking to the real keyboard (Linux)
 
