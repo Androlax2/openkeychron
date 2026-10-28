@@ -78,6 +78,11 @@ impl MiscFeatures {
     pub const fn snap_click(self) -> bool {
         self.bits & (1 << 3) != 0
     }
+
+    #[must_use]
+    pub const fn wireless_timers(self) -> bool {
+        self.bits & (1 << 4) != 0
+    }
 }
 
 impl<T: HidTransport> Keychron<T> {

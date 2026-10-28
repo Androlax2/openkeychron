@@ -5,6 +5,8 @@
 
 mod client;
 mod settings;
+mod wireless;
 
 pub use client::{Features, Keychron, KeychronError, MiscFeatures};
 pub use settings::{Debounce, DebounceAlgorithm, SnapClickMode, SnapClickPair};
+pub use wireless::{MIN_BACKLIGHT_OFF_SECONDS, MIN_SLEEP_SECONDS, WirelessTimers};

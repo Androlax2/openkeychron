@@ -1,5 +1,6 @@
 # Hand-written, not recorded: `openkeychron settings get` on a V5 Max over cable: debounce 50 ms
-# symmetric-defer-global, Snap Click pair 0 = last input on A (0x04) and D (0x07).
+# symmetric-defer-global, Snap Click pair 0 = last input on A (0x04) and D (0x07),
+# wireless timers at their defaults (600 s, 7200 s).
 # Bytes follow docs/protocol/keychron.md. Real recordings need the cable session (#20).
 format_version = 1
 
@@ -65,3 +66,19 @@ data = "a7 08 12 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
 [[event]]
 kind = "read"
 data = "a7 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "a7 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a7 01 00 02 00 fe 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "a7 0b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a7 0b 00 58 02 20 1c 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
