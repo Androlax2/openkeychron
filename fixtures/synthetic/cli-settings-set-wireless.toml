@@ -1,0 +1,59 @@
+# Hand-written, not recorded: `openkeychron settings set ... wireless 30 3600` on a V5 Max
+# over cable, previously at the defaults (600 s, 7200 s).
+# Bytes follow docs/protocol/keychron.md. Real recordings need the cable session (#20).
+format_version = 1
+
+[device]
+name = "Keychron V5 Max"
+vendor_id = 0x3434
+product_id = 0x0951
+usage_page = 0xff60
+usage = 0x61
+
+[[event]]
+kind = "write"
+data = "a7 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a7 01 00 02 00 fe 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "a7 0b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a7 0b 00 58 02 20 1c 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "a7 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a7 01 00 02 00 fe 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "a7 0c 1e 00 10 0e 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a7 0c 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "a7 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a7 01 00 02 00 fe 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "a7 0b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a7 0b 00 1e 00 10 0e 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"

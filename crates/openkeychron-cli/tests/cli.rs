@@ -128,6 +128,41 @@ mod tests {
             text.contains("pair 0: last-input on keys 0x04 and 0x07"),
             "{text}"
         );
+        assert!(
+            text.contains("Wireless:   backlight off after 600 s, sleep after 7200 s"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn settings_set_wireless_saves_a_backup_and_reads_the_values_back() {
+        let path = fixture("cli-settings-set-wireless.toml");
+        let backup = std::env::temp_dir().join(format!(
+            "openkeychron-wireless-backup-{}.json",
+            std::process::id()
+        ));
+        let output = openkeychron(&[
+            "settings",
+            "set",
+            "--backup",
+            backup.to_str().unwrap(),
+            "--fixture",
+            path.to_str().unwrap(),
+            "wireless",
+            "30",
+            "3600",
+        ]);
+        let saved = std::fs::read_to_string(&backup);
+        std::fs::remove_file(&backup).ok();
+        assert!(output.status.success(), "{}", stderr(&output));
+        let saved: serde_json::Value = serde_json::from_str(&saved.unwrap()).unwrap();
+        assert_eq!(saved["wireless"]["backlight_off_seconds"], 600);
+        assert_eq!(saved["wireless"]["sleep_seconds"], 7200);
+        assert!(
+            stdout(&output).contains("wireless 600 7200"),
+            "{}",
+            stdout(&output)
+        );
     }
 
     #[test]

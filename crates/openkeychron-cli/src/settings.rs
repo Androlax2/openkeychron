@@ -1,16 +1,19 @@
-//! `openkeychron settings`: debounce and Snap Click (Keychron commands, `docs/protocol/keychron.md`).
+//! `openkeychron settings`: debounce, Snap Click and wireless timers (Keychron commands,
+//! `docs/protocol/keychron.md`).
 
 use std::path::{Path, PathBuf};
 
 use clap::{Subcommand, ValueEnum};
-use openkeychron_keychron::{Debounce, DebounceAlgorithm, Keychron, SnapClickMode, SnapClickPair};
+use openkeychron_keychron::{
+    Debounce, DebounceAlgorithm, Keychron, SnapClickMode, SnapClickPair, WirelessTimers,
+};
 use serde::Serialize;
 
 use crate::session::{Session, SessionError};
 
 #[derive(Debug, Subcommand)]
 pub enum SettingsAction {
-    /// Print debounce and the active Snap Click pairs. Only reads.
+    /// Print debounce, the active Snap Click pairs and the wireless timers. Only reads.
     Get,
     /// Change one setting. Saves the previous value to --backup first and reads the new one back.
     Set {
@@ -45,6 +48,13 @@ pub enum Setting {
         /// Also write all Snap Click pairs to the keyboard's permanent memory.
         #[arg(long)]
         save: bool,
+    },
+    /// Wireless backlight-off and sleep times, in seconds. The keyboard stores them at once.
+    Wireless {
+        /// Seconds without typing before the backlight turns off (at least 5).
+        backlight_off_seconds: u16,
+        /// Seconds without typing before the keyboard sleeps (at least 60).
+        sleep_seconds: u16,
     },
 }
 
@@ -86,9 +96,16 @@ struct PairOutput {
 }
 
 #[derive(Debug, Serialize)]
+struct WirelessOutput {
+    backlight_off_seconds: u16,
+    sleep_seconds: u16,
+}
+
+#[derive(Debug, Serialize)]
 struct SettingsOutput {
     debounce: DebounceOutput,
     snap_click_pairs: Vec<PairOutput>,
+    wireless: WirelessOutput,
 }
 
 #[derive(Debug, Serialize)]
@@ -96,6 +113,7 @@ struct SettingsOutput {
 enum Backup {
     Debounce(DebounceOutput),
     SnapClick(PairOutput),
+    Wireless(WirelessOutput),
 }
 
 pub fn run(
@@ -124,6 +142,7 @@ pub fn run(
 fn get(keychron: &mut Keychron<Session>, json: bool) -> Result<(), SessionError> {
     let debounce = keychron.debounce()?;
     let pairs = keychron.snap_click_pairs()?;
+    let wireless = wireless_output(keychron.wireless_timers()?);
     let output = SettingsOutput {
         debounce: debounce_output(debounce),
         snap_click_pairs: pairs
@@ -132,6 +151,7 @@ fn get(keychron: &mut Keychron<Session>, json: bool) -> Result<(), SessionError>
             .filter(|(pair, _)| pair.mode != SnapClickMode::Off)
             .map(|(pair, index)| pair_output(index, *pair))
             .collect(),
+        wireless,
     };
     if json {
         return crate::print_json(&output);
@@ -153,6 +173,10 @@ fn get(keychron: &mut Keychron<Session>, json: bool) -> Result<(), SessionError>
             pair.keys[1]
         );
     }
+    println!(
+        "Wireless:   backlight off after {} s, sleep after {} s",
+        output.wireless.backlight_off_seconds, output.wireless.sleep_seconds
+    );
     Ok(())
 }
 
@@ -224,6 +248,29 @@ fn set(
                 backup.display()
             );
         }
+        Setting::Wireless {
+            backlight_off_seconds,
+            sleep_seconds,
+        } => {
+            let previous = wireless_output(keychron.wireless_timers()?);
+            let restore = format!(
+                "openkeychron settings set --backup <FILE> wireless {} {}",
+                previous.backlight_off_seconds, previous.sleep_seconds
+            );
+            write_backup(backup, &Backup::Wireless(previous))?;
+            keychron.set_wireless_timers(WirelessTimers {
+                backlight_off_seconds,
+                sleep_seconds,
+            })?;
+            println!(
+                "Wireless: backlight off after {backlight_off_seconds} s, sleep after \
+                 {sleep_seconds} s."
+            );
+            println!(
+                "Previous value saved to {}. Restore with:\n  {restore}",
+                backup.display()
+            );
+        }
     }
     Ok(())
 }
@@ -249,6 +296,13 @@ fn debounce_output(debounce: Debounce) -> DebounceOutput {
     DebounceOutput {
         algorithm: cli_algorithm(debounce.algorithm),
         time_ms: debounce.time_ms,
+    }
+}
+
+fn wireless_output(timers: WirelessTimers) -> WirelessOutput {
+    WirelessOutput {
+        backlight_off_seconds: timers.backlight_off_seconds,
+        sleep_seconds: timers.sleep_seconds,
     }
 }
 
