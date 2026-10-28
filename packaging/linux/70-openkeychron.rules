@@ -1,6 +1,10 @@
 # openkeychron: let the logged-in user open the VIA raw HID channel of supported Keychron
 # devices, and no other interface on them. Install and remove: docs/INSTALL-linux.md.
 #
+# Privacy: Keychron firmware is built with VIA_INSECURE, so the VIA channel itself can report
+# the keys held right now (quantum/via.c, id_switch_matrix_state). Granting it means granting
+# a way to watch keypresses; see docs/INSTALL-linux.md, "Keystrokes and VIA_INSECURE" (#66).
+#
 # TAG+="uaccess" grants access only to the user of the active local session
 # (systemd-logind), only while that session is active. The file name must sort before
 # 73-seat-late.rules, which applies the tag.
@@ -12,8 +16,8 @@ SUBSYSTEM!="hidraw", GOTO="openkeychron_end"
 ACTION!="add|change", GOTO="openkeychron_end"
 IMPORT{builtin}="usb_id"
 
-# Keychron Link 2.4 GHz receiver, interface 3: its VIA channel (seen on hardware; the typing
-# interface is 2 and stays closed).
+# Keychron Link 2.4 GHz receiver, interface 3: its VIA channel (seen on hardware). The typing
+# interface, 2, stays closed, but see the privacy note above: VIA can still reveal keypresses.
 ENV{ID_VENDOR_ID}=="3434", ENV{ID_MODEL_ID}=="d030", ENV{ID_USB_INTERFACE_NUM}=="03", TAG+="uaccess"
 
 # Keychron V5 Max ISO on a USB cable, interface 1: QMK always puts raw HID there
