@@ -30,7 +30,7 @@ before touching its area:
 
 | Crate | Role |
 |---|---|
-| `crates/openkeychron-hid` | `HidTransport` trait, fixture format, replay and recording transports. Device discovery comes in #16 |
+| `crates/openkeychron-hid` | `HidTransport` trait, fixture format, replay and recording transports, Keychron device discovery and the `hidapi` transport |
 | `crates/openkeychron-via` | VIA protocol: versions, keymap, layers, macros (M1, M2) |
 | `crates/openkeychron-keychron` | Keychron-specific commands: RGB, debounce, LKP, wireless timers (M3) |
 | `crates/openkeychron-cli` | The `openkeychron` binary (M1) |

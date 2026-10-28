@@ -16,6 +16,9 @@ pub enum TransportError {
     #[error("no input report arrived before the timeout")]
     Timeout,
 
+    #[error("device I/O failed: {0}")]
+    Device(String),
+
     #[error("replay: write #{position} sent [{actual}], the fixture expected {expected}")]
     UnexpectedWrite {
         position: usize,

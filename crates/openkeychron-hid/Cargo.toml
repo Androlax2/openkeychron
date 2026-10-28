@@ -9,6 +9,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+hidapi = { version = "2.6", default-features = false, features = ["linux-native-basic-udev"] }
 serde.workspace = true
 thiserror.workspace = true
 toml.workspace = true

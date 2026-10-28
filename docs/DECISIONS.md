@@ -83,3 +83,16 @@ format. Revisit if the hooks grow beyond calling `make`.
 
 The hooks are opt-in per clone (`git config core.hooksPath .githooks`), because they run with
 the rights of whoever commits. CI and the `main` ruleset stay the real gate.
+
+## 2026-10: `hidapi` with its pure-Rust Linux backend
+
+Device access uses the `hidapi` crate (MIT) with `default-features = false` and
+`linux-native-basic-udev`. Compared in #16 with the default backend, which compiles hidapi's
+C code and links `libudev`: the pure-Rust one adds no C code, no system library and no CI
+change, at the cost of a younger backend (`basic-udev` 0.1.x). Everything above
+`openkeychron-hid` sees only `HidTransport`, so switching to the C backend is a one-line
+manifest change if the pure-Rust one misbehaves.
+
+Its Linux backend reports a failed open as text only, so `openkeychron_hid::open` first opens
+the node with the standard library: that is how a permission error is recognised and turned
+into "install the udev rule".
