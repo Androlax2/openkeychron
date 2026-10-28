@@ -28,6 +28,10 @@ struct Cli {
     #[arg(long, global = true, value_name = "FILE")]
     record: Option<PathBuf>,
 
+    /// Talk to the device at PATH (from `openkeychron list`) when several are connected.
+    #[arg(long, global = true, value_name = "PATH", conflicts_with = "fixture")]
+    device: Option<PathBuf>,
+
     /// Print JSON instead of text.
     #[arg(long, global = true)]
     json: bool,
@@ -96,18 +100,26 @@ fn run(cli: &Cli) -> Result<(), SessionError> {
             action,
             cli.fixture.as_deref(),
             cli.record.as_deref(),
+            cli.device.as_deref(),
             cli.json,
         ),
         Command::Settings { action } => settings::run(
             action,
             cli.fixture.as_deref(),
             cli.record.as_deref(),
+            cli.device.as_deref(),
             cli.json,
         ),
     }
 }
 
 fn list(cli: &Cli) -> Result<(), SessionError> {
+    if cli.device.is_some() {
+        return Err(SessionError::Usage(
+            "--device selects a device for commands such as `info`; `list` shows all devices"
+                .to_owned(),
+        ));
+    }
     if cli.record.is_some() {
         return Err(SessionError::Usage(
             "--record applies to commands that talk to a device, such as `info`".to_owned(),
@@ -128,7 +140,11 @@ fn list(cli: &Cli) -> Result<(), SessionError> {
 }
 
 fn info(cli: &Cli) -> Result<(), SessionError> {
-    let session = Session::start(cli.fixture.as_deref(), cli.record.as_deref())?;
+    let session = Session::start(
+        cli.fixture.as_deref(),
+        cli.record.as_deref(),
+        cli.device.as_deref(),
+    )?;
     let device = session.device().clone();
     let mut via = Via::new(session);
     let mut output = read_info(&mut via, &device)
