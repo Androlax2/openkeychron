@@ -44,6 +44,10 @@ version = "0.0.0"
 [[package]]
 name = "openkeychron-via"
 version = "0.0.0"
+dependencies = [
+ "openkeychron-hid",
+ "thiserror",
+]
 
 [[package]]
 name = "proc-macro2"
