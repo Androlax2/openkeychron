@@ -54,8 +54,9 @@ Defined in `common/keychron_raw_hid.h`, handled in `common/keychron_raw_hid.c`.
 | `0xAA` | Wireless-module firmware update | — | — | **Yes. Never send.** Cable only |
 | `0xAB` | Factory test | — | — | **Yes. Never send** |
 
-`0xA1` is the "real" firmware version that `openkeychron info` does not show yet (it shows
-VIA's `VIA_FIRMWARE_VERSION`).
+`0xA1` is the "real" firmware version. `openkeychron info` shows it after checking `0xA0`
+reports protocol version 2; otherwise it says why the version is not reported (#69). The reply
+layout comes from source only: hardware verification is pending (#20).
 
 Feature bits from `0xA2`: bit 0 default layer, 1 Bluetooth, 2 2.4 GHz, 3 analog matrix,
 4 state notify, 5 dynamic debounce, 6 Snap Click, 7 Keychron RGB, 8 quick start, 9 NKRO.

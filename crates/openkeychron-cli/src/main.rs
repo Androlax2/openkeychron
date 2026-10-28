@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use openkeychron_hid::KeychronDevice;
+use openkeychron_keychron::{KNOWN_PROTOCOL_VERSION, Keychron, NotReported};
 use openkeychron_via::Via;
 use serde::Serialize;
 
@@ -69,6 +70,11 @@ struct InfoOutput {
     via_firmware_version: u32,
     layout_options: u32,
     uptime_ms: u64,
+    /// Keychron's own version (`0xA1`), `null` when not reported.
+    keychron_firmware_version: Option<String>,
+    keychron_firmware_build_date: Option<String>,
+    /// Why the Keychron version is missing, `null` when it is reported.
+    keychron_firmware_not_reported: Option<String>,
 }
 
 fn main() -> ExitCode {
@@ -125,9 +131,17 @@ fn info(cli: &Cli) -> Result<(), SessionError> {
     let session = Session::start(cli.fixture.as_deref(), cli.record.as_deref())?;
     let device = session.device().clone();
     let mut via = Via::new(session);
-    let output = read_info(&mut via, &device)
+    let mut output = read_info(&mut via, &device)
         .map_err(|error| SessionError::via(&error, device.is_receiver))?;
-    via.into_transport().finish()?;
+    let mut keychron = Keychron::new(via.into_transport());
+    match keychron.firmware_version()? {
+        Ok(firmware) => {
+            output.keychron_firmware_version = Some(firmware.version);
+            output.keychron_firmware_build_date = Some(firmware.build_date);
+        }
+        Err(reason) => output.keychron_firmware_not_reported = Some(not_reported(reason)),
+    }
+    keychron.into_transport().finish()?;
 
     if cli.json {
         print_json(&output)?;
@@ -146,8 +160,30 @@ fn info(cli: &Cli) -> Result<(), SessionError> {
             "Uptime:               {:.3} s",
             Duration::from_millis(output.uptime_ms).as_secs_f64()
         );
+        match (
+            &output.keychron_firmware_version,
+            &output.keychron_firmware_build_date,
+            &output.keychron_firmware_not_reported,
+        ) {
+            (Some(version), Some(date), _) => {
+                println!("Keychron firmware:    {version} (built {date})");
+            }
+            (_, _, Some(reason)) => println!("Keychron firmware:    not reported ({reason})"),
+            _ => println!("Keychron firmware:    not reported"),
+        }
     }
     Ok(())
+}
+
+fn not_reported(reason: NotReported) -> String {
+    match reason {
+        NotReported::NoKeychronProtocol => {
+            "the firmware does not answer Keychron command 0xa0".to_owned()
+        }
+        NotReported::UnknownProtocolVersion(version) => format!(
+            "Keychron protocol version {version}; this build reads version {KNOWN_PROTOCOL_VERSION}"
+        ),
+    }
 }
 
 fn read_info(
@@ -160,6 +196,9 @@ fn read_info(
         via_firmware_version: via.via_firmware_version()?,
         layout_options: via.layout_options()?,
         uptime_ms: u64::try_from(via.uptime()?.as_millis()).unwrap_or(u64::MAX),
+        keychron_firmware_version: None,
+        keychron_firmware_build_date: None,
+        keychron_firmware_not_reported: None,
     })
 }
 
