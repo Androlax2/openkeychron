@@ -1,7 +1,4 @@
-# openkeychron
-
-The plan lives in GitHub Issues and the project board:
-https://github.com/users/Androlax2/projects/2
+@AGENTS.md
 
 ## Git authorization
 
