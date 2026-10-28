@@ -27,6 +27,20 @@ mod tests {
     }
 
     #[test]
+    fn info_replays_the_real_v5_max_cable_recording() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/v5-max/detect-cable.toml");
+        let output = openkeychron(&["info", "--json", "--fixture", path.to_str().unwrap()]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+        assert_eq!(json["via_protocol_version"], 12);
+        assert_eq!(json["device"]["product_id"], 0x0951);
+        assert_eq!(json["device"]["is_receiver"], false);
+        assert_eq!(json["keychron_firmware_version"], "v1.1.0");
+        assert_eq!(json["keychron_firmware_build_date"], "2025-03-17-17:29:02");
+    }
+
+    #[test]
     fn device_and_fixture_cannot_be_combined() {
         let path = fixture("cli-info.toml");
         let output = openkeychron(&[
