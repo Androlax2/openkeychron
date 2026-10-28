@@ -96,3 +96,76 @@ manifest change if the pure-Rust one misbehaves.
 Its Linux backend reports a failed open as text only, so `openkeychron_hid::open` first opens
 the node with the standard library: that is how a permission error is recognised and turned
 into "install the udev rule".
+
+## 2026-10: Firmware flashing — research for #40 (recommendation, awaiting Theo's decision)
+
+Read-only research: public sources only, nothing flashed, no device touched. Keychron source
+references are to `Keychron/qmk_firmware` at `2b493ff9`.
+
+### Three firmwares, three different risks
+
+| Firmware | Runs on | How it is updated | Recoverable after a failed update? |
+|---|---|---|---|
+| Keyboard (QMK) | STM32F401 (`v5_max/info.json`: `"bootloader": "stm32-dfu"`) | USB DFU from the STM32's ROM bootloader | **Yes**, see below |
+| Wireless module | LKBT51 | Keychron raw HID command `0xAA`, cable only (`common/keychron_raw_hid.c` → `lkbt51_dfu_rx`) | **Unknown**: closed firmware and protocol |
+| Keychron Link receiver | the receiver's own chip | Keychron Launcher | **Unknown**: closed firmware and protocol |
+
+### The keyboard firmware is hard to brick
+
+- The STM32's DFU bootloader is in **System Memory, a factory ROM that cannot be erased or
+  overwritten** (ST AN2606). Keychron's reset button under the space bar starts the chip in it
+  (Keychron's QMK Toolbox guide: hold the reset button while plugging in the cable, until
+  "DFU device connected"). So a failed or interrupted flash, or a wrong file, can always be
+  undone by flashing the right file again, with a second keyboard to drive the computer.
+- **The one real brick is the option bytes.** DFU tools can also write the STM32's option
+  bytes; setting read protection to level 2 is irreversible and disables the ROM bootloader
+  (STM32F4 reference manual, RM0368, "Read protection"). A tool must never write anything but
+  main flash (DfuSe alternate setting 0, from `0x08000000`).
+- **VIA cannot start the bootloader.** This firmware's `quantum/via.c` has no
+  `id_bootloader_jump` case, and Keychron's factory-test jump is commented out
+  (`common/factory_test.c`). Entering DFU always takes a physical action, which also keeps a
+  rogue program from doing it.
+
+### What flashing costs the user
+
+- **Holding Esc while plugging in (Bootmagic) wipes the keyboard's settings** before jumping to
+  the bootloader: `bootmagic_scan` calls `eeconfig_disable()` (`quantum/bootmagic/bootmagic.c`;
+  Keychron does not override it). That is the entry method Keychron's Launcher guide gives. The
+  reset button does not run that code.
+- **A new firmware may reset settings anyway.** QMK ties the keyboard data block's version to
+  its size (`EECONFIG_KB_DATA_VERSION` defaults to `EECONFIG_KB_DATA_SIZE`,
+  `quantum/eeconfig.h`), so an update that adds or resizes a Keychron setting changes it, and
+  QMK treats a block with the wrong version as invalid. Whether a given update resets anything is
+  not knowable in advance. So settings must be read and backed up before any flash.
+- **No integrity check is possible.** Keychron's firmware page publishes `.bin` downloads with no
+  checksum or signature; only HTTPS vouches for the file. A wrong-model file (ANSI vs ISO,
+  another board) flashes without complaint and must be reflashed.
+- **On Linux, the DFU device (`0483:df11`) needs its own udev rule**, a separate permission
+  decision from `70-openkeychron.rules`.
+
+### Recommendation
+
+**Do not build flashing into openkeychron for now.** Keychron's Launcher and QMK Toolbox
+(`dfu-util`) already do it, the recovery path is hardware-only, and the upside is small next to
+the ways a home-made flasher can hurt. Instead:
+
+1. Document the safe manual path for the V5 Max: back up settings with `openkeychron`, enter DFU
+   with the **reset button** (not Esc), flash with `dfu-util` to `0x08000000` only, then restore.
+2. **Never** touch the wireless module (`0xAA`) or the receiver: closed protocols with no known
+   recovery.
+
+If flashing is wanted later, it needs Theo's explicit yes, a new issue and a dependency
+decision, and at least: main flash only (never option bytes), the DFU device identified before
+any write, the exact file and its SHA-256 shown for confirmation, settings backed up first, and
+entry by reset button only.
+
+### Uncertain
+
+- Whether the reset button pulls BOOT0 or only resets (Keychron's guide implies DFU entry;
+  the board schematic was not checked).
+- Whether `dfu-util`'s usual invocation erases the wear-levelled EEPROM sectors at the end of
+  flash, or only the sectors it writes.
+- Whether Keychron's firmware files can be matched to a model from their contents (for example
+  the USB product ID in the descriptors) as a wrong-file check.
+- Exactly when the V5 Max firmware checks the data-block version and what it resets on a
+  mismatch: the boot path was not traced.
