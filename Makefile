@@ -21,7 +21,7 @@ doc:
 	cargo doc --workspace --no-deps --document-private-items --locked
 
 typos:
-	typos --config .config/typos.toml
+	typos --config .config/typos.toml --hidden --exclude .git
 
 deny:
 	cargo deny --config .cargo/deny.toml check
