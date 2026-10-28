@@ -1,0 +1,64 @@
+name: Bug report
+description: Something openkeychron does wrong.
+labels: ["type:bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands or clicks, from the start.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: input
+    id: keyboard
+    attributes:
+      label: Keyboard model and layout
+      placeholder: Keychron V5 Max, ISO (FR)
+    validations:
+      required: true
+  - type: dropdown
+    id: connection
+    attributes:
+      label: Connection
+      options:
+        - USB cable
+        - 2.4 GHz receiver (Keychron Link)
+        - Bluetooth
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version
+      description: As shown by Keychron Launcher or `openkeychron info`.
+  - type: input
+    id: version
+    attributes:
+      label: openkeychron version or commit
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Arch Linux, Wayland
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or logs
+      description: Remove anything personal, such as text typed in a macro.
+      render: shell
