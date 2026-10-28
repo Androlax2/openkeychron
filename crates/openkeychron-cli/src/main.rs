@@ -1,6 +1,7 @@
 //! openkeychron command-line tool.
 
 mod session;
+mod settings;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -39,6 +40,11 @@ enum Command {
     List,
     /// Print the VIA protocol and firmware values of the one connected device. Only reads.
     Info,
+    /// Read or change debounce and Snap Click. Writes only over a USB cable.
+    Settings {
+        #[command(subcommand)]
+        action: settings::SettingsAction,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -71,9 +77,15 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: &Cli) -> Result<(), SessionError> {
-    match cli.command {
+    match &cli.command {
         Command::List => list(cli),
         Command::Info => info(cli),
+        Command::Settings { action } => settings::run(
+            action,
+            cli.fixture.as_deref(),
+            cli.record.as_deref(),
+            cli.json,
+        ),
     }
 }
 
@@ -158,7 +170,7 @@ fn describe(device: &KeychronDevice) -> String {
     )
 }
 
-fn print_json(value: &impl Serialize) -> Result<(), SessionError> {
+pub(crate) fn print_json(value: &impl Serialize) -> Result<(), SessionError> {
     let text = serde_json::to_string_pretty(value)
         .map_err(|error| SessionError::Usage(format!("cannot encode JSON: {error}")))?;
     println!("{text}");
