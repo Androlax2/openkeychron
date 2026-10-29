@@ -9,9 +9,11 @@ mod client;
 mod command;
 mod keycode;
 mod keymap;
+mod layout;
 mod rgb;
 
 pub use client::{Via, ViaError};
 pub use command::REPORT_LEN;
 pub use keycode::{Keycode, KeycodeKind, LayerAction};
+pub use layout::{KeyboardLayout, Legends, PhysicalKey, Rectangle, V5_MAX_FR_ISO};
 pub use rgb::{RgbMatrix, RgbValue, brightness_to_store, stored_brightness};
