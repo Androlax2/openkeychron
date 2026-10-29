@@ -1,0 +1,33 @@
+# Hand-written, synthetic cable-device fixture; not recorded from hardware.
+format_version = 1
+
+[device]
+name = "synthetic V5 Max ISO"
+vendor_id = 13364
+product_id = 2385
+usage_page = 65376
+usage = 97
+
+[[event]]
+kind = "write"
+data = "11 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "11 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "12 00 00 1c 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "12 00 00 1c 00 00 00 01 00 04 00 e0 11 04 31 04 42 04 50 51 52 21 52 a1 7e 00 78 40 ff ff 12 34"
+
+[[event]]
+kind = "write"
+data = "12 00 1c 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "12 00 1c 02 00 e7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"

@@ -16,6 +16,8 @@ pub(crate) enum Command {
     CustomSetValue,
     CustomGetValue,
     CustomSave,
+    GetLayerCount,
+    GetKeymapBuffer,
 }
 
 impl Command {
@@ -26,6 +28,8 @@ impl Command {
             Self::CustomSetValue => 0x07,
             Self::CustomGetValue => 0x08,
             Self::CustomSave => 0x09,
+            Self::GetLayerCount => 0x11,
+            Self::GetKeymapBuffer => 0x12,
         }
     }
 }

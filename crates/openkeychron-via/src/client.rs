@@ -45,6 +45,22 @@ pub enum ViaError {
 
     #[error("set {written}, but the keyboard now reports {read}; nothing was saved")]
     ReadBackMismatch { written: String, read: String },
+
+    #[error("expected at least one keymap layer, got {count}")]
+    InvalidLayerCount { count: u8 },
+
+    #[error("keymap requires 1–32768 keys to fit its 16-bit byte offsets, got {key_count}")]
+    InvalidKeymapSize { key_count: usize },
+
+    #[error(
+        "asked for {expected_size} keymap bytes at offset {expected_offset}, reply echoes {actual_size} bytes at offset {actual_offset}"
+    )]
+    WrongKeymapChunk {
+        expected_offset: u16,
+        actual_offset: u16,
+        expected_size: u8,
+        actual_size: u8,
+    },
 }
 
 impl<T: HidTransport> Via<T> {
