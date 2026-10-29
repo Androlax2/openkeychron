@@ -7,8 +7,10 @@
 
 mod client;
 mod command;
+mod keycode;
 mod rgb;
 
 pub use client::{Via, ViaError};
 pub use command::REPORT_LEN;
+pub use keycode::{Keycode, KeycodeKind, LayerAction};
 pub use rgb::{RgbMatrix, RgbValue, brightness_to_store, stored_brightness};
