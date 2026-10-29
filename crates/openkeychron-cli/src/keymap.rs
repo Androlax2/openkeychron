@@ -1,6 +1,6 @@
-//! Read-only keymap display. Physical French legends name positions, not live assignments.
+//! Keymap commands. Physical French legends name positions, not live assignments.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
 use openkeychron_via::{V5_MAX_FR_ISO, Via};
@@ -16,6 +16,15 @@ pub enum KeymapAction {
         /// Show only this zero-based layer (all layers are still read).
         #[arg(long)]
         layer: Option<u8>,
+    },
+    /// Set one raw keycode after saving a complete matrix/encoder backup. Writes over USB cable only.
+    Set(crate::keymap_edit::SetArgs),
+    /// Restore matrix/encoder assignments, saving a separate pre-restore backup first.
+    Restore(crate::keymap_edit::RestoreArgs),
+    /// Unavailable until the installed firmware's reset footprint and defaults are verified.
+    Reset {
+        #[arg(long, value_name = "FILE")]
+        backup: PathBuf,
     },
 }
 
@@ -49,13 +58,28 @@ pub fn run(
     device: Option<&Path>,
     json: bool,
 ) -> Result<(), SessionError> {
-    let KeymapAction::Show { layer } = action;
-    let output = query(Session::start(fixture, record, device)?, *layer)?;
-    if json {
-        return crate::print_json(&output);
+    if record.is_some() && matches!(action, KeymapAction::Set(_) | KeymapAction::Restore(_)) {
+        return Err(SessionError::Usage(
+            "--record is not supported for keymap set/restore; it must not overwrite a protected backup".to_owned()
+        ));
     }
-    print_grid(&output);
-    Ok(())
+    match action {
+        KeymapAction::Show { layer } => {
+            let output = query(Session::start(fixture, record, device)?, *layer)?;
+            if json {
+                return crate::print_json(&output);
+            }
+            print_grid(&output);
+            Ok(())
+        }
+        KeymapAction::Set(args) => crate::keymap_edit::set(args, fixture, device, json),
+        KeymapAction::Restore(args) => crate::keymap_edit::restore(args, fixture, device, json),
+        KeymapAction::Reset { backup } => Err(SessionError::Usage(format!(
+            "keymap reset is unavailable: installed firmware reset footprint/defaults are not verified; \
+             no session was opened and no backup was created at {}",
+            backup.display()
+        ))),
+    }
 }
 
 fn query(session: Session, selected_layer: Option<u8>) -> Result<KeymapOutput, SessionError> {
