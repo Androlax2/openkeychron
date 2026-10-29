@@ -1,5 +1,6 @@
 //! openkeychron command-line tool.
 
+mod keymap;
 mod rgb;
 mod session;
 mod settings;
@@ -49,6 +50,11 @@ enum Command {
         /// Wait up to this many milliseconds per reply (1–60000; default: 500).
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..=60_000))]
         reply_timeout_ms: Option<u64>,
+    },
+    /// Display keymap layers for the V5 Max ISO, with French position labels. Only reads.
+    Keymap {
+        #[command(subcommand)]
+        action: keymap::KeymapAction,
     },
     /// Read or change the RGB effect, speed, brightness and colour. Writes only over a USB cable.
     Rgb {
@@ -100,6 +106,13 @@ fn run(cli: &Cli) -> Result<(), SessionError> {
     match &cli.command {
         Command::List => list(cli),
         Command::Info { reply_timeout_ms } => info(cli, *reply_timeout_ms),
+        Command::Keymap { action } => keymap::run(
+            action,
+            cli.fixture.as_deref(),
+            cli.record.as_deref(),
+            cli.device.as_deref(),
+            cli.json,
+        ),
         Command::Rgb { action } => rgb::run(
             action,
             cli.fixture.as_deref(),

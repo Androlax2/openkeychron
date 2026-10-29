@@ -56,7 +56,9 @@ Recordings need the real keyboard, so they are `needs-hardware` issues for Theo.
 `read_timeout` event when no reply arrived. The command still exits with an error; a saved
 file does not mean detection succeeded. Failed writes and non-timeout I/O errors are not
 fixture events, so a disconnected device may leave only the earlier exchanges. If saving
-also fails, the error reports both failures. Other commands currently save only on success.
+also fails, the error reports both failures. `keymap show --record <file>` likewise saves
+completed exchanges when its read fails, and prints no success output until finalization
+passes. RGB and settings commands currently save only on success.
 
 For a separately approved receiver diagnostic, `info --reply-timeout-ms 5000` waits up to
 five seconds **per reply**, for both VIA and Keychron queries. The default stays 500 ms;

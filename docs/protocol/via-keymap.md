@@ -44,6 +44,41 @@ Other families, unknown codes and Keychron custom values stay `Raw(u16)`. There 
 exhaustive key-name catalogue, locale-to-glyph conversion or lossy reconstruction from a
 decoded view.
 
+## CLI display
+
+`openkeychron keymap show [--layer N] [--json]` reads the direct USB-cable V5 Max ISO
+(`3434:0951`) using the [FR ISO layout](v5-max-fr-iso-layout.md). Other models and
+receivers are refused before VIA requests, because their matrix dimensions cannot be
+inferred safely from this model's definition.
+
+Replay the hand-written two-layer example without opening a device:
+
+```sh
+cargo run -p openkeychron-cli -- keymap show --fixture fixtures/synthetic/cli-keymap.toml
+cargo run -p openkeychron-cli -- keymap show --layer 1 --json --fixture fixtures/synthetic/cli-keymap.toml
+```
+
+Text is a six-row **matrix grid**, not a scaled keyboard drawing. `A=0x0014` means the
+physical French A position currently has raw keycode `0x0014`; it does not promise
+that the host will type A. Zero and transparent codes remain visible on physical keys.
+Unused zero cells are blank; unused nonzero cells display their `(row,column)` and raw
+value instead of hiding unexpected data. Wide grids may need a wide terminal.
+
+`--layer` is zero-based and filters output only: the reader still consumes the complete
+reported keymap, so the same fixture works with or without layer selection. An unavailable
+layer fails after reading the count and before requesting the keymap buffer.
+
+JSON includes the device, full `layer_count`, matrix `rows` and `columns`, and selected
+`layers`. Each layer has an `index` and 114 row-major `keys`, including unused positions;
+each key has `row`, `column`, a physical `legend` (or `null`), and the exact numeric
+`keycode`. No unknown/custom codes, unused slots or zero values are discarded. Encoder
+rotation maps are not part of this output. Output is printed only after successful
+session finalization, including full fixture consumption or saving a requested recording.
+
+`fixtures/synthetic/cli-keymap.toml` is deliberately synthetic, with chosen raw values and
+mostly zero entries, not a device default keymap. The issue's suggested real recording
+`fixtures/v5-max/keymap.toml` does not exist; no hardware capture is implied by this demo.
+
 ## Sources and verification
 
 Source revision: Keychron QMK `2b493ff95f2665db719b1e95c91babb5036e72f3`:
@@ -59,4 +94,5 @@ including malformed replies and boundary offsets. `cargo test -p openkeychron-vi
 checks classification and exhaustive raw-value preservation. `fixtures/synthetic/via-keymap.toml`
 is hand-written, not hardware evidence. No new real-device keymap capture has been made;
 the existing real cable capture verifies metadata only. Receiver configuration stays
-unsupported; the CLI is unchanged (#23 owns `keymap show`).
+unsupported. The CLI display above uses these existing read-only APIs without adding
+keymap writes or a decoded key-name catalogue.
