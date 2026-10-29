@@ -8,6 +8,7 @@
 mod client;
 mod command;
 mod keycode;
+mod keymap;
 mod rgb;
 
 pub use client::{Via, ViaError};
