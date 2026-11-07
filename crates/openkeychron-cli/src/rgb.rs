@@ -22,7 +22,7 @@ pub enum RgbAction {
     /// and stores it on the keyboard only if it matches.
     Set {
         /// New file for the previous values, saved before writing (JSON).
-        #[arg(long, value_name = "FILE")]
+        #[arg(long, value_name = "FILE", conflicts_with = "record")]
         backup: PathBuf,
 
         #[command(subcommand)]
@@ -33,7 +33,7 @@ pub enum RgbAction {
     /// Shown only while the lighting effect is Keychron's per-key effect.
     Key {
         /// New file for the previous colour, saved before writing (JSON).
-        #[arg(long, value_name = "FILE")]
+        #[arg(long, value_name = "FILE", conflicts_with = "record")]
         backup: PathBuf,
 
         /// A French legend as `openkeychron keymap show` prints it (`A`, `Esc`, `Num 7`), or a
@@ -99,6 +99,12 @@ pub fn run(
     device: Option<&Path>,
     json: bool,
 ) -> Result<(), SessionError> {
+    if record.is_some() && matches!(action, RgbAction::Set { .. } | RgbAction::Key { .. }) {
+        return Err(SessionError::Usage(
+            "--record is not supported for rgb set/key; it must not overwrite a protected backup"
+                .to_owned(),
+        ));
+    }
     match action {
         RgbAction::Get => {
             let session = Session::start(fixture, record, device)?;

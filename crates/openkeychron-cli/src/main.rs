@@ -33,8 +33,8 @@ struct Cli {
     #[arg(long, global = true, value_name = "FILE", conflicts_with = "record")]
     fixture: Option<PathBuf>,
 
-    /// Record the session to FILE; unsupported for keymap set/restore/reset, macro set/restore
-    /// and rgb mixed region/effect/restore (see docs/FIXTURES.md).
+    /// Record the session to FILE; unsupported for keymap set/restore/reset, macro set/restore,
+    /// rgb set/key, rgb mixed region/effect/restore and settings set (see docs/FIXTURES.md).
     #[arg(long, global = true, value_name = "FILE")]
     record: Option<PathBuf>,
 
@@ -428,6 +428,83 @@ mod tests {
                 error.to_string().contains("--record is not supported"),
                 "{error}"
             );
+        }
+    }
+
+    fn rgb_and_settings_writes() -> [Vec<&'static str>; 3] {
+        [
+            vec![
+                "openkeychron",
+                "rgb",
+                "set",
+                "--backup",
+                "before.json",
+                "brightness",
+                "100",
+            ],
+            vec![
+                "openkeychron",
+                "rgb",
+                "key",
+                "--backup",
+                "before.json",
+                "A",
+                "0",
+                "255",
+            ],
+            vec![
+                "openkeychron",
+                "settings",
+                "set",
+                "--backup",
+                "before.json",
+                "debounce",
+                "none",
+                "5",
+            ],
+        ]
+    }
+
+    #[test]
+    fn rgb_and_settings_writes_reject_recording_given_next_to_backup_at_parse_time() {
+        for arguments in rgb_and_settings_writes() {
+            for destination in ["before.json", "elsewhere.toml"] {
+                // Right after `--backup FILE`: clap only checks the conflict while it is still
+                // parsing the command that owns `--backup`. Later placements are caught at
+                // dispatch (next test).
+                let mut arguments = arguments.clone();
+                arguments.splice(5..5, ["--record", destination]);
+                let error = Cli::try_parse_from(arguments).unwrap_err();
+                assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
+            }
+        }
+    }
+
+    #[test]
+    fn rgb_and_settings_dispatch_refuses_recording_even_when_parser_validation_is_bypassed() {
+        for mut arguments in rgb_and_settings_writes() {
+            arguments.extend(["--fixture", "fixture-that-must-not-be-opened.toml"]);
+            let mut cli = Cli::try_parse_from(arguments).unwrap();
+            cli.record = Some("recording-that-must-not-be-created.toml".into());
+            let error = super::run(&cli).unwrap_err();
+            assert!(
+                error.to_string().contains("--record is not supported"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn rgb_and_settings_reads_retain_their_record_argument() {
+        for arguments in [["rgb", "get"], ["settings", "get"]] {
+            let cli = Cli::try_parse_from(
+                ["openkeychron"]
+                    .into_iter()
+                    .chain(arguments)
+                    .chain(["--record", "not-executed.toml"]),
+            )
+            .unwrap();
+            assert_eq!(cli.record, Some("not-executed.toml".into()));
         }
     }
 
