@@ -11,6 +11,7 @@ mod keycode;
 mod keymap;
 mod keymap_write;
 mod layout;
+mod macros;
 mod rgb;
 
 pub use client::{Via, ViaError};
@@ -18,4 +19,5 @@ pub use command::REPORT_LEN;
 pub use keycode::{Keycode, KeycodeKind, LayerAction};
 pub use keymap_write::EncoderDirection;
 pub use layout::{KeyboardLayout, Legends, PhysicalKey, Rectangle, V5_MAX_FR_ISO};
+pub use macros::{MacroAction, MacroError, buffer_from_slots, decode_macro, encode_macro, slots};
 pub use rgb::{RgbMatrix, RgbValue, brightness_to_store, stored_brightness};
