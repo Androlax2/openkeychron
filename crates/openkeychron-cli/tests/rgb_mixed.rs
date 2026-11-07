@@ -542,4 +542,164 @@ mod tests {
             assert!(!backup.exists(), "{test}");
         }
     }
+
+    fn restore_from(source: &PathBuf, fixture_name: &str, test: &str, extra: &[&str]) -> Output {
+        let backup = new_backup_path(&format!("{test}-pre-restore"));
+        let fixture_path = fixture(fixture_name);
+        let mut arguments = vec![
+            "rgb",
+            "mixed",
+            "restore",
+            "--backup",
+            backup.to_str().unwrap(),
+            "--fixture",
+            fixture_path.to_str().unwrap(),
+        ];
+        arguments.extend_from_slice(extra);
+        arguments.push(source.to_str().unwrap());
+        let output = openkeychron(&arguments);
+        std::fs::remove_file(source).ok();
+        assert_eq!(
+            backup.exists(),
+            output.status.success(),
+            "a pre-restore backup exists only after a restore that went through"
+        );
+        std::fs::remove_file(&backup).ok();
+        output
+    }
+
+    fn from_another_build(backup: &mut serde_json::Value) {
+        backup["firmware"]["build_date"] = "2025-06-01-12:00:00".into();
+    }
+
+    fn without_a_firmware_build(backup: &mut serde_json::Value) {
+        backup["format_version"] = 1.into();
+        backup.as_object_mut().unwrap().remove("firmware");
+    }
+
+    #[test]
+    fn rgb_mixed_region_records_the_firmware_build_in_the_backup() {
+        let path = fixture("cli-rgb-mixed-region.toml");
+        let backup = new_backup_path("region-firmware");
+        let output = openkeychron(&[
+            "rgb",
+            "mixed",
+            "region",
+            "--backup",
+            backup.to_str().unwrap(),
+            "--fixture",
+            path.to_str().unwrap(),
+            "1",
+            "A",
+            "4,0",
+        ]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        let saved = read_json(&backup);
+        assert_eq!(saved["format_version"], 2);
+        assert_eq!(
+            saved["firmware"],
+            serde_json::json!({"version": "v1.1.0", "build_date": "2025-03-17-10:00:00"})
+        );
+    }
+
+    #[test]
+    fn rgb_mixed_region_refuses_to_write_when_the_firmware_build_is_not_reported() {
+        let path = fixture("cli-rgb-mixed-firmware-unknown.toml");
+        let backup = new_backup_path("region-firmware-unknown");
+        let output = openkeychron(&[
+            "rgb",
+            "mixed",
+            "region",
+            "--backup",
+            backup.to_str().unwrap(),
+            "--fixture",
+            path.to_str().unwrap(),
+            "1",
+            "A",
+        ]);
+        assert_failed_at_the_end_of_the_fixture(&output);
+        assert!(
+            stderr(&output).contains(
+                "mixed RGB writes record the Keychron firmware build in their backup, and this \
+                 keyboard does not report it (Keychron protocol version 3"
+            ),
+            "{}",
+            stderr(&output)
+        );
+        assert!(!backup.exists());
+    }
+
+    #[test]
+    fn rgb_mixed_restore_refuses_a_backup_from_another_firmware_build() {
+        let source = changed_backup("restore-other-build", from_another_build);
+        let output = restore_from(&source, "cli-rgb-mixed-firmware.toml", "other-build", &[]);
+        assert_failed_at_the_end_of_the_fixture(&output);
+        assert!(
+            stderr(&output).contains(
+                "was taken on Keychron firmware v1.1.0 built 2025-06-01-12:00:00; this keyboard \
+                 runs v1.1.0 built 2025-03-17-10:00:00"
+            ),
+            "{}",
+            stderr(&output)
+        );
+        assert!(
+            stderr(&output).contains("nothing was written; pass --allow-other-firmware"),
+            "{}",
+            stderr(&output)
+        );
+    }
+
+    #[test]
+    fn rgb_mixed_restore_writes_a_backup_from_another_build_with_allow_other_firmware() {
+        let source = changed_backup("restore-other-build-allowed", from_another_build);
+        let output = restore_from(
+            &source,
+            "cli-rgb-mixed-restore.toml",
+            "other-build-allowed",
+            &["--allow-other-firmware"],
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert!(
+            stdout(&output).contains(
+                "restored although it was taken on another firmware build (v1.1.0 built \
+                 2025-06-01-12:00:00)"
+            ),
+            "{}",
+            stdout(&output)
+        );
+    }
+
+    #[test]
+    fn rgb_mixed_restore_refuses_a_format_1_backup_without_allow_other_firmware() {
+        let source = changed_backup("restore-format-1", without_a_firmware_build);
+        let output = restore_from(&source, "cli-rgb-mixed-firmware.toml", "format-1", &[]);
+        assert_failed_at_the_end_of_the_fixture(&output);
+        assert!(
+            stderr(&output).contains(
+                "does not record the firmware build its effect numbers belong to (format \
+                 version 1); this keyboard runs v1.1.0 built 2025-03-17-10:00:00"
+            ),
+            "{}",
+            stderr(&output)
+        );
+    }
+
+    #[test]
+    fn rgb_mixed_restore_writes_a_format_1_backup_with_allow_other_firmware() {
+        let source = changed_backup("restore-format-1-allowed", without_a_firmware_build);
+        let output = restore_from(
+            &source,
+            "cli-rgb-mixed-restore.toml",
+            "format-1-allowed",
+            &["--allow-other-firmware"],
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert!(
+            stdout(&output).contains(
+                "restored although it does not record the firmware build it was taken on"
+            ),
+            "{}",
+            stdout(&output)
+        );
+    }
 }

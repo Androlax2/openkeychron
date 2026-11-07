@@ -12,6 +12,7 @@
 use openkeychron_hid::HidTransport;
 
 use crate::client::{Keychron, KeychronError, RGB_GROUP};
+use crate::firmware::{FirmwareVersion, NotReported};
 use crate::perkey::{MatrixSize, SAVE};
 
 const GET_INFO: u8 = 0x0B;
@@ -217,6 +218,14 @@ impl<T: HidTransport> MixedRgb<'_, T> {
         Ok(())
     }
 
+    /// [`Keychron::firmware_version`]: the build that gives the effect numbers in effect lists
+    /// their meaning, so a saved effect list can name the build it belongs to. Only reads.
+    pub fn firmware_version(
+        &mut self,
+    ) -> Result<Result<FirmwareVersion, NotReported>, KeychronError> {
+        self.keychron.firmware_version()
+    }
+
     /// Writes: `A8 02` stores all Keychron RGB settings in EEPROM at once: indicators, per-key
     /// type and colours, mixed regions and effects, including changes another program left in
     /// RAM.
@@ -301,6 +310,7 @@ mod tests {
 
     use super::MixedEffect;
     use crate::client::{Keychron, KeychronError, REPORT_LEN};
+    use crate::firmware::FirmwareVersion;
     use crate::perkey::MatrixSize;
 
     const V5_MAX: MatrixSize = MatrixSize {
@@ -401,6 +411,27 @@ mod tests {
                 rgb.effects_per_region()
             )),
             Ok((98, 2, 5))
+        );
+        assert_eq!(keychron.into_transport().finish(), Ok(()));
+    }
+
+    #[test]
+    fn reads_the_firmware_build_its_effect_numbers_belong_to() {
+        let mut version_reply = vec![0xa1];
+        version_reply.extend_from_slice(b"v1.1.0 2025-03-17-10:00:00");
+        let mut keychron = keychron(&[
+            v5_max_opening(),
+            exchange(&[0xa0], &[0xa0, 0x02, 0x00, 0x02]),
+            exchange(&[0xa1], &version_reply),
+        ]);
+        assert_eq!(
+            keychron
+                .mixed_rgb()
+                .and_then(|mut rgb| rgb.firmware_version()),
+            Ok(Ok(FirmwareVersion {
+                version: "v1.1.0".to_owned(),
+                build_date: "2025-03-17-10:00:00".to_owned(),
+            }))
         );
         assert_eq!(keychron.into_transport().finish(), Ok(()));
     }
