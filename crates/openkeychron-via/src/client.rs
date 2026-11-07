@@ -87,6 +87,35 @@ pub enum ViaError {
         written: u16,
         read: u16,
     },
+
+    #[error("the keyboard reports an empty macro buffer")]
+    EmptyMacroBuffer,
+
+    #[error(
+        "VIA command 0x{command:02x} asked for {expected_size} macro bytes at offset {expected_offset}, reply echoes {actual_size} bytes at offset {actual_offset}"
+    )]
+    WrongMacroChunk {
+        command: u8,
+        expected_offset: u16,
+        actual_offset: u16,
+        expected_size: u8,
+        actual_size: u8,
+    },
+
+    #[error(
+        "a macro buffer write needs at least one byte and must end in 0, got {length} bytes; a non-zero last byte disables every macro"
+    )]
+    InvalidMacroBuffer { length: usize },
+
+    #[error(
+        "the keyboard's macro buffer holds {keyboard} bytes, but {buffer} bytes were given; nothing was written"
+    )]
+    MacroBufferSizeMismatch { keyboard: u16, buffer: usize },
+
+    #[error(
+        "wrote macro byte 0x{written:02x} at offset {offset}, but read back 0x{read:02x}; state may have changed"
+    )]
+    MacroWriteMismatch { offset: u16, written: u8, read: u8 },
 }
 
 impl<T: HidTransport> Via<T> {

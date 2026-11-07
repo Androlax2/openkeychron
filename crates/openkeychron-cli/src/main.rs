@@ -4,6 +4,8 @@ mod backup_file;
 mod keymap;
 mod keymap_backup;
 mod keymap_edit;
+mod macro_backup;
+mod macros;
 mod rgb;
 mod session;
 mod settings;
@@ -28,7 +30,8 @@ struct Cli {
     #[arg(long, global = true, value_name = "FILE", conflicts_with = "record")]
     fixture: Option<PathBuf>,
 
-    /// Record the session to FILE; unsupported for keymap set/restore/reset (see docs/FIXTURES.md).
+    /// Record the session to FILE; unsupported for keymap set/restore/reset and macro set/restore
+    /// (see docs/FIXTURES.md).
     #[arg(long, global = true, value_name = "FILE")]
     record: Option<PathBuf>,
 
@@ -58,6 +61,11 @@ enum Command {
     Keymap {
         #[command(subcommand)]
         action: keymap::KeymapAction,
+    },
+    /// List or safely edit macros on a cable V5 Max ISO. Editing requires a new backup file.
+    Macro {
+        #[command(subcommand)]
+        action: macros::MacroCommand,
     },
     /// Read or change the RGB effect, speed, brightness, colour and per-key colours. Writes only
     /// over a USB cable.
@@ -111,6 +119,13 @@ fn run(cli: &Cli) -> Result<(), SessionError> {
         Command::List => list(cli),
         Command::Info { reply_timeout_ms } => info(cli, *reply_timeout_ms),
         Command::Keymap { action } => keymap::run(
+            action,
+            cli.fixture.as_deref(),
+            cli.record.as_deref(),
+            cli.device.as_deref(),
+            cli.json,
+        ),
+        Command::Macro { action } => macros::run(
             action,
             cli.fixture.as_deref(),
             cli.record.as_deref(),

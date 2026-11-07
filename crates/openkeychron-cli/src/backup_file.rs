@@ -1,4 +1,4 @@
-//! Backup files written before any device write: keymap now, macros next (#25).
+//! Backup files written before any keymap or macro write.
 
 use std::fs::File;
 use std::io::{Read, Write};
