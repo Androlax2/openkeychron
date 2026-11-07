@@ -1,0 +1,21 @@
+{
+  "_comment": "Hand-written synthetic VIA definition for openkeychron tests. Not copied from Keychron or the VIA keyboards repository, and not any keyboard's real geometry: it reuses the V5 Max ANSI ID (3434:0950) only to stand for a second model.",
+  "name": "Synthetic second model",
+  "vendorId": "0x3434",
+  "productId": "0x0950",
+  "keycodes": ["qmk_lighting"],
+  "matrix": { "rows": 2, "cols": 4 },
+  "layouts": {
+    "keymap": [
+      [{ "c": "#777777" }, "0,0", { "x": 0.5 }, "0,1", "0, 2", { "x": 0.25 }, "0,3\n\n\n\n\n\n\n\n\ne0"],
+      [
+        { "y": 0.25, "w": 1.5 },
+        "1,0",
+        { "x": 0.25, "w": 1.25, "h": 2, "x2": -0.25, "w2": 1.5, "h2": 1 },
+        "1,1",
+        { "h": 2 },
+        "1,3"
+      ]
+    ]
+  }
+}

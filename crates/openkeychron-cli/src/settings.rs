@@ -10,6 +10,7 @@ use openkeychron_keychron::{
 use serde::Serialize;
 
 use crate::session::{Session, SessionError};
+use crate::{backup_file, guarded_write};
 
 #[derive(Debug, Subcommand)]
 pub enum SettingsAction {
@@ -17,7 +18,7 @@ pub enum SettingsAction {
     Get,
     /// Change one setting. Saves the previous value to --backup first and reads the new one back.
     Set {
-        /// Where to save the previous value before writing (JSON).
+        /// New file to save the previous value to before writing (JSON). An existing file is refused.
         #[arg(long, value_name = "FILE")]
         backup: PathBuf,
 
@@ -124,12 +125,8 @@ pub fn run(
     json: bool,
 ) -> Result<(), SessionError> {
     let session = Session::start(fixture, record, device)?;
-    if matches!(action, SettingsAction::Set { .. }) && session.device().is_receiver {
-        return Err(SessionError::Usage(
-            "settings are only written over a USB cable: writes through a receiver are not \
-             verified yet (see docs/protocol/keychron-link.md)"
-                .to_owned(),
-        ));
+    if matches!(action, SettingsAction::Set { .. }) {
+        guarded_write::require_write_verified("settings writes", session.device())?;
     }
     let mut keychron = Keychron::new(session);
     let result = match action {
@@ -190,11 +187,11 @@ fn set(
         Setting::Debounce { algorithm, time_ms } => {
             let previous = debounce_output(keychron.debounce()?);
             let restore = format!(
-                "openkeychron settings set --backup <FILE> debounce {} {}",
+                "openkeychron settings set --backup <NEW_FILE> debounce {} {}",
                 name(&previous.algorithm),
                 previous.time_ms
             );
-            write_backup(backup, &Backup::Debounce(previous))?;
+            backup_file::save_new(backup, "settings", &Backup::Debounce(previous))?;
             keychron.set_debounce(Debounce {
                 algorithm: library_algorithm(algorithm),
                 time_ms,
@@ -221,13 +218,13 @@ fn set(
             })?;
             let previous = pair_output(index, previous);
             let restore = format!(
-                "openkeychron settings set --backup <FILE> snap-click {index} {} 0x{:02x} 0x{:02x}{}",
+                "openkeychron settings set --backup <NEW_FILE> snap-click {index} {} 0x{:02x} 0x{:02x}{}",
                 name(&previous.mode),
                 previous.keys[0],
                 previous.keys[1],
                 if save { " --save" } else { "" }
             );
-            write_backup(backup, &Backup::SnapClick(previous))?;
+            backup_file::save_new(backup, "settings", &Backup::SnapClick(previous))?;
             keychron.set_snap_click_pair(
                 index,
                 SnapClickPair {
@@ -255,10 +252,10 @@ fn set(
         } => {
             let previous = wireless_output(keychron.wireless_timers()?);
             let restore = format!(
-                "openkeychron settings set --backup <FILE> wireless {} {}",
+                "openkeychron settings set --backup <NEW_FILE> wireless {} {}",
                 previous.backlight_off_seconds, previous.sleep_seconds
             );
-            write_backup(backup, &Backup::Wireless(previous))?;
+            backup_file::save_new(backup, "settings", &Backup::Wireless(previous))?;
             keychron.set_wireless_timers(WirelessTimers {
                 backlight_off_seconds,
                 sleep_seconds,
@@ -274,17 +271,6 @@ fn set(
         }
     }
     Ok(())
-}
-
-fn write_backup(path: &Path, backup: &Backup) -> Result<(), SessionError> {
-    let text = serde_json::to_string_pretty(backup)
-        .map_err(|error| SessionError::Usage(format!("cannot encode the backup: {error}")))?;
-    std::fs::write(path, text + "\n").map_err(|error| {
-        SessionError::Usage(format!(
-            "cannot write the backup to {}: {error}; nothing was changed",
-            path.display()
-        ))
-    })
 }
 
 fn name(value: &impl ValueEnum) -> String {

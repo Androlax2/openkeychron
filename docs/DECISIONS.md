@@ -175,3 +175,70 @@ entry by reset button only.
   the USB product ID in the descriptors) as a wrong-file check.
 - Exactly when the V5 Max firmware checks the data-block version and what it resets on a
   mismatch: the boot path was not traced.
+
+## 2026-11: `keymap reset` ships, guarded by a read-back backup (#24)
+
+An earlier agent's plan on #24 kept `keymap reset` as a permanent refusal because the
+installed firmware's reset footprint and defaults were unverified. Theo overruled it on
+2026-11-07: reset ships as VIA `0x06`.
+
+Conditions: the CLI saves a complete matrix/encoder backup and reads it back before sending
+the reset, and refuses on any failure; Keychron's QMK source must show `0x06` rewrites only
+matrix and encoder keycodes (it does, see `docs/protocol/via-keymap-write.md`); and a
+`needs-hardware` issue (#82) confirms reset then restore on the real V5 Max.
+
+Why: `keymap restore` already rewrites everything `0x06` touches, so the backup is a full
+undo. The unknown defaults only mean the result of a reset cannot be read back and checked.
+
+## 2026-11: Macro text names its host layout (#89)
+
+The firmware types macro text through the US-ANSI `ascii_to_keycode_lut`, so `text:a` typed
+`q` on Theo's French AZERTY host. `macro set` now needs `--host-layout` whenever it has a
+`text:` action:
+
+- `fr` turns the text into the tap/down/up keystrokes that type it on French AZERTY, from
+  QMK's `keymap_french.h` (the Windows and Linux layout; macOS French differs). Shift and AltGr characters are wrapped in their modifier.
+- `us` keeps firmware text bytes, as VIA writes them.
+
+Characters that need a dead key (`^`, `¨`, `~`, `` ` ``) or have no key on the layout are
+refused, never approximated. `macro list --host-layout fr` shows those keystrokes as text
+again; without the flag it shows the stored actions.
+
+Why a required flag and no default: a default of `us` keeps the bug for every French user,
+and a default of `fr` types the wrong characters for everyone else. Both fail silently, on the
+host, after the write. A missing flag fails before any report is sent. The layout is a
+property of the host, not the keyboard, so it is not read from the device or the keyboard's
+own FR ISO layout.
+
+Not chosen: a separate action such as `fr-text:` (keeps the default ambiguity for `text:`),
+and reading the host's layout from the desktop session (platform-specific, and the macro may
+be played on another computer).
+
+## 2026-11: Other models' layouts come from VIA files the user supplies, never bundled (#41)
+
+Decided by Theo on 2026-11-07. `openkeychron-via` reads Keychron's VIA definition JSON
+(`ViaDefinition`) and keeps a `DeviceRegistry` keyed by USB vendor and product ID. The
+built-in V5 Max FR ISO table stays the only layout compiled in; any other model's layout is
+read from the file the user passes (`keymap show --layout <file>`). The registry is for
+reading and display: writes stay limited to the V5 Max ISO on a USB cable until another model
+is verified on hardware. `serde_json` (MIT OR Apache-2.0, already used by the CLI) became a
+dependency of `openkeychron-via` for this, as a workspace dependency.
+
+Rejected:
+
+- Bundling Keychron's VIA files in the repository: they are GPL-2.0, and openkeychron is
+  MIT OR Apache-2.0. Shipping them would need a licence decision, and the V5 Max table was
+  written to restate facts rather than embed upstream files
+  (`docs/protocol/v5-max-fr-iso-layout.md`).
+- Downloading the definition from GitHub at run time: openkeychron is local-first and makes
+  no network calls.
+
+Test definitions are hand-written synthetic files, not copies of upstream ones. See
+`docs/protocol/via-definitions.md`.
+
+Added on 2026-11-07 with #91, at Theo's request: each registry entry says whether writes to
+that model were verified on hardware (`WriteAccess`). Only the built-in V5 Max ISO is
+`VerifiedOverCable`; a definition registered from a file is always `ReadOnly`. Keymap and
+macro writes, `rgb key` and backup validation ask only the built-in registry, and no write
+command takes `--layout`, so a layout file never enables a write. Receivers stay refused.
+Since #100, `rgb set` and `settings set` ask it too.
