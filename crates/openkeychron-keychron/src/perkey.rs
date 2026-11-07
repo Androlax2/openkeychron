@@ -14,7 +14,7 @@ use openkeychron_hid::HidTransport;
 use crate::client::{Keychron, KeychronError, RGB_GROUP};
 
 const GET_PROTOCOL_VERSION: u8 = 0x01;
-const SAVE: u8 = 0x02;
+pub(crate) const SAVE: u8 = 0x02;
 const GET_LED_COUNT: u8 = 0x05;
 const GET_LED_INDEX: u8 = 0x06;
 const GET_COLORS: u8 = 0x09;
@@ -64,24 +64,33 @@ impl<T: HidTransport> Keychron<T> {
     /// the LED count (`A8 05`). Fails with [`KeychronError::Unsupported`] on firmware without
     /// per-key RGB, before anything is changed.
     pub fn per_key_rgb(&mut self) -> Result<PerKeyRgb<'_, T>, KeychronError> {
+        let led_count = self.keychron_rgb_led_count(FEATURE)?;
+        Ok(PerKeyRgb {
+            keychron: self,
+            led_count,
+        })
+    }
+
+    /// The checks every Keychron RGB session starts with: the feature bit (`0xA2`) and protocol
+    /// version (`A8 01`), then the LED count (`A8 05`). `feature` names what is unsupported.
+    pub(crate) fn keychron_rgb_led_count(
+        &mut self,
+        feature: &'static str,
+    ) -> Result<u8, KeychronError> {
         let features = match self.features() {
             Ok(features) => features,
-            Err(KeychronError::Unhandled(_)) => return Err(KeychronError::Unsupported(FEATURE)),
+            Err(KeychronError::Unhandled(_)) => return Err(KeychronError::Unsupported(feature)),
             Err(other) => return Err(other),
         };
         if !features.keychron_rgb() {
-            return Err(KeychronError::Unsupported(FEATURE));
+            return Err(KeychronError::Unsupported(feature));
         }
         let reply = self.group(RGB_GROUP, GET_PROTOCOL_VERSION, &[])?;
         let version = u16::from_le_bytes([reply[3], reply[4]]);
         if version != KNOWN_PROTOCOL_VERSION {
             return Err(KeychronError::UnknownRgbProtocol(version));
         }
-        let led_count = self.group(RGB_GROUP, GET_LED_COUNT, &[])?[3];
-        Ok(PerKeyRgb {
-            keychron: self,
-            led_count,
-        })
+        Ok(self.group(RGB_GROUP, GET_LED_COUNT, &[])?[3])
     }
 }
 
