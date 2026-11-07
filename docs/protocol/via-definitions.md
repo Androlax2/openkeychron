@@ -74,8 +74,9 @@ receiver, which does not identify the keyboard behind it.
 
 Only the built-in V5 Max ISO is `VerifiedOverCable`. A definition registered from a file is
 always `ReadOnly`, and no write command accepts `--layout`, so a layout file never enables a
-write. Keymap and macro writes and `rgb key` ask the built-in registry for a write-verified
-model and refuse a receiver; keymap and macro backups must name a write-verified model.
+write. Keymap and macro writes, `rgb key` and the `rgb mixed` writes ask the built-in registry
+for a write-verified model and refuse a receiver; keymap, macro and mixed RGB backups must name
+a write-verified model.
 
 A definition for a model the registry already knows is refused, so a file cannot replace the
 built-in V5 Max ISO legends or its write access.

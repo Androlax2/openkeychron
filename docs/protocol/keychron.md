@@ -146,6 +146,33 @@ Implemented in `crates/openkeychron-keychron/src/perkey.rs` (#29); `openkeychron
   firmware's own `MATRIX_COLS`: the other bytes keep the request's content, so a column outside
   the matrix would read as LED 0. openkeychron refuses positions outside the layout's matrix.
 
+### Mixed RGB
+
+From `common/rgb/keychron_rgb.c`, `common/rgb/mixed_rgb.c` and `common/rgb/keychron_rgb_type.h`.
+Implemented in `crates/openkeychron-keychron/src/mixed.rs` (#83); `openkeychron rgb mixed` uses it.
+
+- **Regions and effect lists.** Every LED belongs to a region (`regions[]`, one byte per LED).
+  Each region has its own list of `EFFECTS_PER_LAYER` slots and plays them in turn, so the
+  keyboard shows one effect per region at a time. The firmware calls regions "layers"; they are
+  not keymap layers. `A8 0B` reports how many there are; openkeychron reads it instead of
+  assuming the V5 Max's 2 × 5, and refuses a keyboard that reports 0 of either.
+- **An effect slot** is 8 bytes (`effect_config_t`): the RGB matrix effect number, H, S, speed,
+  then how long it plays in milliseconds (little-endian u32, compared with `timer_elapsed32`).
+  Effect `0` is an empty slot: the firmware skips it. `A8 0F` refuses an effect number from
+  `RGB_MATRIX_CUSTOM_MIXED_RGB` up, so a region cannot nest mixed RGB; the number itself depends
+  on the build, so openkeychron leaves that check to the firmware and reports the refusal.
+- **Bounds the firmware checks.** `A8 0C`/`0D` check `start + count` against the LED count, and
+  `A8 0D` refuses a region number ≥ `EFFECT_LAYERS`. `A8 0E`/`0F` check `start + count` against
+  the slots, but not the region (see "Firmware bugs" below). openkeychron checks all of them
+  before sending.
+- **They show only in the mixed effect.** `MIXED_RGB` is a custom RGB matrix effect, like
+  `PER_KEY_RGB`, and its VIA effect number depends on the build. `A8 0D` writes both `regions[]`
+  and `rgb_regions[]`, the copy `mixed_rgb()` loads when the effect starts; an effect list change
+  restarts every region's cycle (`update_mixed_rgb_effect_count`).
+- **Defaults** (`eeconfig_reset_custom_rgb`): region 0 plays effect 5, region 1 effect 2 (hue 0),
+  both saturation 255, speed 127, 5000 ms; the region map comes from the board's
+  `default_region[]`.
+
 The plain RGB effect, brightness, speed and colour are **not** Keychron commands: they are VIA's
 lighting values (`id_custom_get_value` / `id_custom_set_value` on channel
 `id_qmk_rgb_matrix_channel`, `quantum/via.h` at the repository root). #28 implements them in
