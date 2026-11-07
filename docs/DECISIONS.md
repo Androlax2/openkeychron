@@ -189,3 +189,25 @@ matrix and encoder keycodes (it does, see `docs/protocol/via-keymap-write.md`); 
 
 Why: `keymap restore` already rewrites everything `0x06` touches, so the backup is a full
 undo. The unknown defaults only mean the result of a reset cannot be read back and checked.
+
+## 2026-11: Other models' layouts come from VIA files the user supplies, never bundled (#41)
+
+Decided by Theo on 2026-11-07. `openkeychron-via` reads Keychron's VIA definition JSON
+(`ViaDefinition`) and keeps a `DeviceRegistry` keyed by USB vendor and product ID. The
+built-in V5 Max FR ISO table stays the only layout compiled in; any other model's layout is
+read from the file the user passes (`keymap show --layout <file>`). The registry is for
+reading and display: writes stay limited to the V5 Max ISO on a USB cable until another model
+is verified on hardware. `serde_json` (MIT OR Apache-2.0, already used by the CLI) became a
+dependency of `openkeychron-via` for this, as a workspace dependency.
+
+Rejected:
+
+- Bundling Keychron's VIA files in the repository: they are GPL-2.0, and openkeychron is
+  MIT OR Apache-2.0. Shipping them would need a licence decision, and the V5 Max table was
+  written to restate facts rather than embed upstream files
+  (`docs/protocol/v5-max-fr-iso-layout.md`).
+- Downloading the definition from GitHub at run time: openkeychron is local-first and makes
+  no network calls.
+
+Test definitions are hand-written synthetic files, not copies of upstream ones. See
+`docs/protocol/via-definitions.md`.

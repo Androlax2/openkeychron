@@ -46,10 +46,12 @@ decoded view.
 
 ## CLI display
 
-`openkeychron keymap show [--layer N] [--json]` reads the direct USB-cable V5 Max ISO
-(`3434:0951`) using the [FR ISO layout](v5-max-fr-iso-layout.md). Other models and
-receivers are refused before VIA requests, because their matrix dimensions cannot be
-inferred safely from this model's definition.
+`openkeychron keymap show [--layer N] [--layout VIA_JSON] [--json]` reads a keyboard on a
+USB cable. The V5 Max ISO (`3434:0951`) uses the built-in [FR ISO layout](v5-max-fr-iso-layout.md);
+any other model needs `--layout` with its VIA definition file, which supplies the matrix size
+([VIA definitions](via-definitions.md)). A model without a known layout, and any receiver,
+are refused before VIA requests. In `--json`, each key has `is_physical`: false for matrix
+slots no physical key uses.
 
 Replay the hand-written two-layer example without opening a device:
 

@@ -7,17 +7,21 @@
 
 mod client;
 mod command;
+mod definition;
 mod keycode;
 mod keymap;
 mod keymap_write;
 mod layout;
 mod macros;
+mod registry;
 mod rgb;
 
 pub use client::{Via, ViaError};
 pub use command::REPORT_LEN;
+pub use definition::{DefinitionError, DefinitionKey, ViaDefinition};
 pub use keycode::{Keycode, KeycodeKind, LayerAction};
 pub use keymap_write::EncoderDirection;
 pub use layout::{KeyboardLayout, Legends, PhysicalKey, Rectangle, V5_MAX_FR_ISO};
 pub use macros::{MacroAction, MacroError, buffer_from_slots, decode_macro, encode_macro, slots};
+pub use registry::{DeviceRegistry, RegisteredLayout, RegistryError};
 pub use rgb::{RgbMatrix, RgbValue, brightness_to_store, stored_brightness};

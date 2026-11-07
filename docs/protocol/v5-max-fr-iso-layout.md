@@ -2,7 +2,8 @@
 
 `openkeychron_via::V5_MAX_FR_ISO` describes the Keychron V5 Max ISO knob model
 (`3434:0951`). It is a static, dependency-free table, not a device query or a default
-keymap to write to the keyboard.
+keymap to write to the keyboard. `DeviceRegistry::built_in()` maps `3434:0951` to it; other
+models' layouts come from VIA definition files (`docs/protocol/via-definitions.md`).
 
 ## Matrix and geometry
 
