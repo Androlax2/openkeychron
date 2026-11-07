@@ -5,12 +5,12 @@
 use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
-use openkeychron_keychron::{Keychron, KeychronError, MatrixSize, PerKeyColor};
+use openkeychron_keychron::{KeychronError, MatrixSize, PerKeyColor, PerKeyRgb};
 use openkeychron_via::{RgbMatrix, RgbValue, V5_MAX_FR_ISO, Via, brightness_to_store};
 use serde::Serialize;
 
-use crate::guarded_write;
 use crate::session::{Session, SessionError};
+use crate::{guarded_write, rgb_guarded_write};
 
 #[derive(Debug, Subcommand)]
 pub enum RgbAction {
@@ -102,9 +102,7 @@ pub fn run(
         RgbAction::Set { backup, value } => {
             let session = Session::start(fixture, record, device)?;
             guarded_write::require_write_verified("RGB writes", session.device())?;
-            let mut via = Via::new(session);
-            set(&mut via, backup, value, via_error(false))?;
-            via.into_transport().finish()
+            set(session, backup, value, via_error(false))
         }
         RgbAction::Key {
             backup,
@@ -157,34 +155,38 @@ fn get(
 }
 
 fn set(
-    via: &mut Via<Session>,
+    session: Session,
     backup: &Path,
     value: &Value,
     via_error: impl Fn(openkeychron_via::ViaError) -> SessionError,
 ) -> Result<(), SessionError> {
-    // Reading first also proves the firmware has the lighting channel before anything changes.
-    let previous = output(via.rgb_matrix().map_err(&via_error)?);
-    let restore = restore_command(&previous, value);
-    write_backup(backup, &previous)?;
+    rgb_guarded_write::write_lighting(
+        session,
+        backup,
+        // Reading first also proves the firmware has the lighting channel before anything changes.
+        |reader| Ok(output(reader.rgb_matrix().map_err(&via_error)?)),
+        |via, previous| {
+            let restore = restore_command(&previous, value);
+            let wanted = match *value {
+                Value::Brightness { value } => RgbValue::Brightness(value),
+                Value::Effect { value } => RgbValue::Effect(value),
+                Value::Speed { value } => RgbValue::Speed(value),
+                Value::Color { hue, saturation } => RgbValue::Color { hue, saturation },
+            };
+            via.set_rgb_value(wanted).map_err(&via_error)?;
 
-    let wanted = match *value {
-        Value::Brightness { value } => RgbValue::Brightness(value),
-        Value::Effect { value } => RgbValue::Effect(value),
-        Value::Speed { value } => RgbValue::Speed(value),
-        Value::Color { hue, saturation } => RgbValue::Color { hue, saturation },
-    };
-    via.set_rgb_value(wanted).map_err(&via_error)?;
-
-    println!(
-        "Set {:?}; it reads back as {:?} and is saved.",
-        wanted,
-        wanted.expected_read_back()
-    );
-    println!(
-        "Previous values saved to {}. Restore with:\n  {restore}",
-        backup.display()
-    );
-    Ok(())
+            println!(
+                "Set {:?}; it reads back as {:?} and is saved.",
+                wanted,
+                wanted.expected_read_back()
+            );
+            println!(
+                "Previous values saved to {}. Restore with:\n  {restore}",
+                backup.display()
+            );
+            Ok(())
+        },
+    )
 }
 
 fn set_key(
@@ -195,42 +197,56 @@ fn set_key(
     saturation: u8,
 ) -> Result<(), SessionError> {
     guarded_write::require_write_verified("per-key RGB writes", session.device())?;
-    let mut keychron = Keychron::new(session);
-    let result = write_key_color(&mut keychron, backup, key, hue, saturation);
-    keychron.into_transport().complete(result)
+    rgb_guarded_write::write_per_key(
+        session,
+        backup,
+        |reader| capture_key_color(reader, key),
+        |rgb, previous| write_key_color(rgb, backup, &previous, hue, saturation),
+    )
 }
 
-fn write_key_color(
-    keychron: &mut Keychron<Session>,
-    backup: &Path,
+/// The LED under `key` and its colour.
+fn capture_key_color(
+    reader: &mut rgb_guarded_write::PerKeyReader<'_, '_>,
     key: KeyPosition,
-    hue: u8,
-    saturation: u8,
-) -> Result<(), SessionError> {
-    let mut rgb = keychron.per_key_rgb()?;
+) -> Result<KeyBackup, SessionError> {
     let matrix = MatrixSize {
         rows: V5_MAX_FR_ISO.rows,
         columns: V5_MAX_FR_ISO.columns,
     };
-    let led = rgb.led_index(matrix, key.row, key.column)?.ok_or_else(|| {
-        SessionError::Usage(format!(
-            "key `{}` ({},{}) has no LED",
-            key.legend, key.row, key.column
-        ))
-    })?;
-    let previous = rgb.color(led)?;
-    write_json(
-        backup,
-        &KeyBackup {
-            key: key.legend,
-            row: key.row,
-            column: key.column,
-            led,
-            hue: previous.hue,
-            saturation: previous.saturation,
-            value: previous.value,
-        },
-    )?;
+    let led = reader
+        .led_index(matrix, key.row, key.column)?
+        .ok_or_else(|| {
+            SessionError::Usage(format!(
+                "key `{}` ({},{}) has no LED",
+                key.legend, key.row, key.column
+            ))
+        })?;
+    let previous = reader.color(led)?;
+    Ok(KeyBackup {
+        key: key.legend,
+        row: key.row,
+        column: key.column,
+        led,
+        hue: previous.hue,
+        saturation: previous.saturation,
+        value: previous.value,
+    })
+}
+
+fn write_key_color(
+    rgb: &mut PerKeyRgb<'_, Session>,
+    backup: &Path,
+    previous: &KeyBackup,
+    hue: u8,
+    saturation: u8,
+) -> Result<(), SessionError> {
+    let led = previous.led;
+    let previous_color = PerKeyColor {
+        hue: previous.hue,
+        saturation: previous.saturation,
+        value: previous.value,
+    };
     // Every per-key effect ignores the stored value, so keeping it changes nothing visible.
     let wanted = PerKeyColor {
         hue,
@@ -242,7 +258,7 @@ fn write_key_color(
         // Left in RAM, the wrong colour would reach EEPROM with the next Keychron RGB save, from
         // this tool or any other.
         Err(error @ KeychronError::ReadBackMismatch { .. }) => {
-            return Err(match rgb.set_color(led, previous) {
+            return Err(match rgb.set_color(led, previous_color) {
                 Ok(()) => SessionError::Keychron(format!(
                     "{error}; the previous colour is set again and nothing was saved"
                 )),
@@ -259,7 +275,7 @@ fn write_key_color(
     println!(
         "Key `{}` ({},{}, LED {led}) set to hue {hue}, saturation {saturation}; it reads back \
          the same and is saved.",
-        key.legend, key.row, key.column
+        previous.key, previous.row, previous.column
     );
     println!(
         "It shows while the lighting effect is Keychron's per-key effect, whose number depends \
@@ -269,8 +285,8 @@ fn write_key_color(
         "Previous colour saved to {}. Restore with:\n  openkeychron rgb key --backup <FILE> \
          {},{} {} {}",
         backup.display(),
-        key.row,
-        key.column,
+        previous.row,
+        previous.column,
         previous.hue,
         previous.saturation
     );
@@ -338,21 +354,6 @@ fn restore_command(previous: &RgbOutput, value: &Value) -> String {
         Value::Speed { .. } => format!("{prefix} speed {}", previous.speed),
         Value::Color { .. } => format!("{prefix} color {} {}", previous.hue, previous.saturation),
     }
-}
-
-fn write_backup(path: &Path, previous: &RgbOutput) -> Result<(), SessionError> {
-    write_json(path, previous)
-}
-
-fn write_json(path: &Path, previous: &impl Serialize) -> Result<(), SessionError> {
-    let text = serde_json::to_string_pretty(previous)
-        .map_err(|error| SessionError::Usage(format!("cannot encode the backup: {error}")))?;
-    std::fs::write(path, text + "\n").map_err(|error| {
-        SessionError::Usage(format!(
-            "cannot write the backup to {}: {error}; nothing was changed",
-            path.display()
-        ))
-    })
 }
 
 fn output(rgb: RgbMatrix) -> RgbOutput {
