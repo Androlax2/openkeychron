@@ -189,3 +189,27 @@ matrix and encoder keycodes (it does, see `docs/protocol/via-keymap-write.md`); 
 
 Why: `keymap restore` already rewrites everything `0x06` touches, so the backup is a full
 undo. The unknown defaults only mean the result of a reset cannot be read back and checked.
+
+## 2026-11: Macro text names its host layout (#89)
+
+The firmware types macro text through the US-ANSI `ascii_to_keycode_lut`, so `text:a` typed
+`q` on Theo's French AZERTY host. `macro set` now needs `--host-layout` whenever it has a
+`text:` action:
+
+- `fr` turns the text into the tap/down/up keystrokes that type it on French AZERTY, from
+  QMK's `keymap_french.h`. Shift and AltGr characters are wrapped in their modifier.
+- `us` keeps firmware text bytes, as VIA writes them.
+
+Characters that need a dead key (`^`, `¨`, `~`, `` ` ``) or have no key on the layout are
+refused, never approximated. `macro list --host-layout fr` shows those keystrokes as text
+again; without the flag it shows the stored actions.
+
+Why a required flag and no default: a default of `us` keeps the bug for every French user,
+and a default of `fr` types the wrong characters for everyone else. Both fail silently, on the
+host, after the write. A missing flag fails before any report is sent. The layout is a
+property of the host, not the keyboard, so it is not read from the device or the keyboard's
+own FR ISO layout.
+
+Not chosen: a separate action such as `fr-text:` (keeps the default ambiguity for `text:`),
+and reading the host's layout from the desktop session (platform-specific, and the macro may
+be played on another computer).

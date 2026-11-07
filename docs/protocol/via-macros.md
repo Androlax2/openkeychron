@@ -68,6 +68,34 @@ openkeychron only decodes what it would encode byte for byte (for example delays
 leading zeros, ending in `|`). Anything else is shown as *unreadable* with its raw bytes,
 never dropped, and `macro set` keeps those bytes unchanged in the other slots.
 
+## Text for the host's layout (#89)
+
+Because the firmware's text is US-ANSI, `macro set` needs `--host-layout` whenever it has a
+`text:` action:
+
+- `--host-layout us` stores the text as firmware text bytes, as above.
+- `--host-layout fr` stores the keystrokes that type the text on a French AZERTY host
+  ([`keymap_french.h`](https://github.com/Keychron/qmk_firmware/blob/2b493ff95f2665db719b1e95c91babb5036e72f3/quantum/keymap_extras/keymap_french.h)):
+  a tap per character, with a run of Shift characters inside one `down:0xe1`…`up:0xe1` and
+  a run of AltGr characters inside one `down:0xe6`…`up:0xe6` (right Alt). `text:Aé1@` becomes
+  `down:0xe1 tap:0x14 up:0xe1 tap:0x1f down:0xe1 tap:0x1e up:0xe1 down:0xe6 tap:0x27 up:0xe6`.
+  French letters printed on a key (`é è ç à ù`, `€ £ § µ ° ² ¤`) work too.
+
+A character the layout cannot type with one key and its modifiers is refused before any
+report is sent. That includes the dead keys `^`, `¨`, `~` and `` ` ``, whose result depends on the next key
+and on the host, and characters such as newline or tab, which are keys, not text: use
+`tap:0x28` or `tap:0x2b`.
+
+Keystrokes take 3 bytes per action instead of 1 per character, so French text uses the macro
+buffer about three times faster.
+
+`macro list --host-layout fr` shows tap, down and up actions as `text:"…"` when they are
+exactly those keystrokes (a run of plain taps, or one modifier held only over characters
+typed with it); the stored bytes do not change. Firmware text bytes then show as
+`us-text:"…"`, because on a French host they type other characters. Without
+`--host-layout`, `macro list` shows the stored actions. In JSON, keystroke text is
+`{"host_text": "…"}` and the top-level `host_layout` names the layout.
+
 ## Writes
 
 Before any write, the CLI reads the count, size and the whole buffer, refuses to continue if
@@ -93,8 +121,8 @@ The backup covers the macro buffer only, not keymaps, lighting, settings or EEPR
 
 ## Synthetic verification only
 
-`fixtures/synthetic/cli-macro-list.toml`, `cli-macro-set.toml` and `cli-macro-restore.toml`
-describe a hand-written 4-slot, 40-byte buffer. `macro-backup.json` is that chosen data, not
+`fixtures/synthetic/cli-macro-list.toml`, `cli-macro-set.toml`, `cli-macro-set-fr.toml` and
+`cli-macro-restore.toml` describe a hand-written 4-slot, 40-byte buffer. `macro-backup.json` is that chosen data, not
 a backup of a real keyboard.
 
 ```sh
