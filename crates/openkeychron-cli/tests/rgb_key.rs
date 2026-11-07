@@ -99,7 +99,10 @@ mod tests {
         let output = rgb_key("cli-info.toml", &backup, "A");
         assert!(!output.status.success());
         assert!(
-            stderr(&output).contains("only written over a USB cable"),
+            stderr(&output).contains(
+                "per-key RGB writes require the V5 Max ISO (3434:0951) on a USB cable; receiver \
+                 and unverified-model writes are refused (got receiver 3434:d030)"
+            ),
             "{}",
             stderr(&output)
         );

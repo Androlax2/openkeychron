@@ -112,7 +112,7 @@ pub fn run(
         } => {
             // Resolved before opening the device, so a mistyped key never reaches the keyboard.
             let key = resolve_key(key)?;
-            let session = cable_session(Session::start(fixture, record, device)?)?;
+            let session = Session::start(fixture, record, device)?;
             set_key(session, backup, key, *hue, *saturation)
         }
     }
@@ -120,18 +120,6 @@ pub fn run(
 
 fn via_error(through_receiver: bool) -> impl Fn(openkeychron_via::ViaError) -> SessionError {
     move |error| SessionError::via(&error, through_receiver)
-}
-
-/// Refuses a receiver session for commands that write.
-fn cable_session(session: Session) -> Result<Session, SessionError> {
-    if session.device().is_receiver {
-        return Err(SessionError::Usage(
-            "lighting is only written over a USB cable: writes through a receiver are not \
-             verified yet (see docs/protocol/keychron-link.md)"
-                .to_owned(),
-        ));
-    }
-    Ok(session)
 }
 
 fn get(
