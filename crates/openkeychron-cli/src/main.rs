@@ -56,7 +56,8 @@ enum Command {
         #[command(subcommand)]
         action: keymap::KeymapAction,
     },
-    /// Read or change the RGB effect, speed, brightness and colour. Writes only over a USB cable.
+    /// Read or change the RGB effect, speed, brightness, colour and per-key colours. Writes only
+    /// over a USB cable.
     Rgb {
         #[command(subcommand)]
         action: rgb::RgbAction,
