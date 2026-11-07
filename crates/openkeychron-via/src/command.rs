@@ -13,11 +13,17 @@ pub(crate) const UNHANDLED: u8 = 0xFF;
 pub(crate) enum Command {
     GetProtocolVersion,
     GetKeyboardValue,
+    GetKeycode,
+    SetKeycode,
+    ResetKeymap,
     CustomSetValue,
     CustomGetValue,
     CustomSave,
     GetLayerCount,
     GetKeymapBuffer,
+    SetKeymapBuffer,
+    GetEncoder,
+    SetEncoder,
 }
 
 impl Command {
@@ -25,11 +31,17 @@ impl Command {
         match self {
             Self::GetProtocolVersion => 0x01,
             Self::GetKeyboardValue => 0x02,
+            Self::GetKeycode => 0x04,
+            Self::SetKeycode => 0x05,
+            Self::ResetKeymap => 0x06,
             Self::CustomSetValue => 0x07,
             Self::CustomGetValue => 0x08,
             Self::CustomSave => 0x09,
             Self::GetLayerCount => 0x11,
             Self::GetKeymapBuffer => 0x12,
+            Self::SetKeymapBuffer => 0x13,
+            Self::GetEncoder => 0x14,
+            Self::SetEncoder => 0x15,
         }
     }
 }

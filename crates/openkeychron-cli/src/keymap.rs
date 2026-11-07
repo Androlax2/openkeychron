@@ -1,4 +1,4 @@
-//! Read-only keymap display. Physical French legends name positions, not live assignments.
+//! Keymap commands. Physical French legends name positions, not live assignments.
 
 use std::path::Path;
 
@@ -17,6 +17,13 @@ pub enum KeymapAction {
         #[arg(long)]
         layer: Option<u8>,
     },
+    /// Set one raw keycode after saving a complete matrix/encoder backup. Writes over USB cable only.
+    Set(crate::keymap_edit::SetArgs),
+    /// Restore matrix/encoder assignments, saving a separate pre-restore backup first.
+    Restore(crate::keymap_edit::RestoreArgs),
+    /// Reset every layer's matrix and encoder keys to firmware defaults, after saving a
+    /// complete backup. Writes over USB cable only; undo with keymap restore.
+    Reset(crate::keymap_edit::ResetArgs),
 }
 
 #[derive(Debug, Serialize)]
@@ -49,13 +56,29 @@ pub fn run(
     device: Option<&Path>,
     json: bool,
 ) -> Result<(), SessionError> {
-    let KeymapAction::Show { layer } = action;
-    let output = query(Session::start(fixture, record, device)?, *layer)?;
-    if json {
-        return crate::print_json(&output);
+    if record.is_some()
+        && matches!(
+            action,
+            KeymapAction::Set(_) | KeymapAction::Restore(_) | KeymapAction::Reset(_)
+        )
+    {
+        return Err(SessionError::Usage(
+            "--record is not supported for keymap set/restore/reset; it must not overwrite a protected backup".to_owned()
+        ));
     }
-    print_grid(&output);
-    Ok(())
+    match action {
+        KeymapAction::Show { layer } => {
+            let output = query(Session::start(fixture, record, device)?, *layer)?;
+            if json {
+                return crate::print_json(&output);
+            }
+            print_grid(&output);
+            Ok(())
+        }
+        KeymapAction::Set(args) => crate::keymap_edit::set(args, fixture, device, json),
+        KeymapAction::Restore(args) => crate::keymap_edit::restore(args, fixture, device, json),
+        KeymapAction::Reset(args) => crate::keymap_edit::reset(args, fixture, device, json),
+    }
 }
 
 fn query(session: Session, selected_layer: Option<u8>) -> Result<KeymapOutput, SessionError> {

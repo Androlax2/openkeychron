@@ -96,3 +96,6 @@ is hand-written, not hardware evidence. No new real-device keymap capture has be
 the existing real cable capture verifies metadata only. Receiver configuration stays
 unsupported. The CLI display above uses these existing read-only APIs without adding
 keymap writes or a decoded key-name catalogue.
+
+Backed-up editing is documented separately in [keymap write safety](via-keymap-write.md).
+The `show` command stays read-only.

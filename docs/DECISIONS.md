@@ -175,3 +175,17 @@ entry by reset button only.
   the USB product ID in the descriptors) as a wrong-file check.
 - Exactly when the V5 Max firmware checks the data-block version and what it resets on a
   mismatch: the boot path was not traced.
+
+## 2026-11: `keymap reset` ships, guarded by a read-back backup (#24)
+
+An earlier agent's plan on #24 kept `keymap reset` as a permanent refusal because the
+installed firmware's reset footprint and defaults were unverified. Theo overruled it on
+2026-11-07: reset ships as VIA `0x06`.
+
+Conditions: the CLI saves a complete matrix/encoder backup and reads it back before sending
+the reset, and refuses on any failure; Keychron's QMK source must show `0x06` rewrites only
+matrix and encoder keycodes (it does, see `docs/protocol/via-keymap-write.md`); and a
+`needs-hardware` issue (#82) confirms reset then restore on the real V5 Max.
+
+Why: `keymap restore` already rewrites everything `0x06` touches, so the backup is a full
+undo. The unknown defaults only mean the result of a reset cannot be read back and checked.

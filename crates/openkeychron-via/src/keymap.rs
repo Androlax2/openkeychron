@@ -4,11 +4,11 @@
 
 use openkeychron_hid::HidTransport;
 
-use crate::command::Command;
+use crate::command::{Command, REPORT_LEN};
 use crate::{Keycode, Via, ViaError};
 
-const CHUNK_BYTES: usize = 28;
-const MAX_KEYS: usize = 32_768;
+pub(crate) const CHUNK_BYTES: usize = 28;
+pub(crate) const MAX_KEYS: usize = 32_768;
 
 impl<T: HidTransport> Via<T> {
     /// Reads the number of dynamic keymap layers. A zero-layer reply is invalid.
@@ -39,15 +39,7 @@ impl<T: HidTransport> Via<T> {
                 .map_err(|_| ViaError::InvalidKeymapSize { key_count })?;
             let [high, low] = offset.to_be_bytes();
             let reply = self.exchange(Command::GetKeymapBuffer, &[high, low, size])?;
-            let actual_offset = u16::from_be_bytes([reply[1], reply[2]]);
-            if actual_offset != offset || reply[3] != size {
-                return Err(ViaError::WrongKeymapChunk {
-                    expected_offset: offset,
-                    actual_offset,
-                    expected_size: size,
-                    actual_size: reply[3],
-                });
-            }
+            validate_chunk(&reply, offset, size)?;
             keys.extend(
                 reply[4..4 + usize::from(size)]
                     .as_chunks::<2>()
@@ -58,4 +50,21 @@ impl<T: HidTransport> Via<T> {
         }
         Ok(keys)
     }
+}
+
+pub(crate) fn validate_chunk(
+    reply: &[u8; REPORT_LEN],
+    offset: u16,
+    size: u8,
+) -> Result<(), ViaError> {
+    let actual_offset = u16::from_be_bytes([reply[1], reply[2]]);
+    if actual_offset != offset || reply[3] != size {
+        return Err(ViaError::WrongKeymapChunk {
+            expected_offset: offset,
+            actual_offset,
+            expected_size: size,
+            actual_size: reply[3],
+        });
+    }
+    Ok(())
 }
