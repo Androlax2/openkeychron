@@ -19,7 +19,7 @@ pub enum RgbAction {
     /// Change one value. Saves the previous values to --backup first, reads the new one back,
     /// and stores it on the keyboard only if it matches.
     Set {
-        /// Where to save the previous values before writing (JSON).
+        /// New file for the previous values, saved before writing (JSON).
         #[arg(long, value_name = "FILE")]
         backup: PathBuf,
 
@@ -30,7 +30,7 @@ pub enum RgbAction {
     /// colour to --backup first, reads the new one back, and stores it only if it matches.
     /// Shown only while the lighting effect is Keychron's per-key effect.
     Key {
-        /// Where to save the previous colour before writing (JSON).
+        /// New file for the previous colour, saved before writing (JSON).
         #[arg(long, value_name = "FILE")]
         backup: PathBuf,
 
@@ -270,7 +270,7 @@ fn write_key_color(
          on the firmware build."
     );
     println!(
-        "Previous colour saved to {}. Restore with:\n  openkeychron rgb key --backup <FILE> \
+        "Previous colour saved to {}. Restore with:\n  openkeychron rgb key --backup <NEW_FILE> \
          {},{} {} {}",
         backup.display(),
         previous.row,
@@ -329,7 +329,7 @@ fn resolve_key(name: &str) -> Result<KeyPosition, SessionError> {
 }
 
 fn restore_command(previous: &RgbOutput, value: &Value) -> String {
-    let prefix = "openkeychron rgb set --backup <FILE>";
+    let prefix = "openkeychron rgb set --backup <NEW_FILE>";
     match value {
         Value::Brightness { .. } => match brightness_to_store(previous.brightness) {
             Some(send) => format!("{prefix} brightness {send}"),
