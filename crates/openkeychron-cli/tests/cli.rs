@@ -406,4 +406,36 @@ mod tests {
         );
         assert!(!backup.exists());
     }
+
+    #[test]
+    fn rgb_set_sends_no_write_when_the_backup_cannot_be_saved() {
+        // The fixture holds only the reads before the backup, so any write would fail the replay.
+        let path = fixture("cli-rgb-get.toml");
+        let backup = std::env::temp_dir()
+            .join(format!("openkeychron-rgb-missing-{}", std::process::id()))
+            .join("backup.json");
+        let output = openkeychron(&[
+            "rgb",
+            "set",
+            "--backup",
+            backup.to_str().unwrap(),
+            "--fixture",
+            path.to_str().unwrap(),
+            "brightness",
+            "128",
+        ]);
+        let stderr = stderr(&output);
+        assert!(!output.status.success());
+        assert!(
+            stderr.contains(&format!(
+                "cannot write the backup to {}: ",
+                backup.display()
+            )),
+            "{stderr}"
+        );
+        assert!(
+            stderr.trim_end().ends_with("; nothing was changed"),
+            "{stderr}"
+        );
+    }
 }

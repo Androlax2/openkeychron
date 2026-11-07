@@ -8,6 +8,7 @@ mod keymap_edit;
 mod macro_backup;
 mod macros;
 mod rgb;
+mod rgb_guarded_write;
 mod session;
 mod settings;
 

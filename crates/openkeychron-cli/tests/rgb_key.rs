@@ -144,4 +144,29 @@ mod tests {
         );
         assert!(!backup.exists());
     }
+
+    #[test]
+    fn perkey_sends_no_write_when_the_backup_cannot_be_saved() {
+        // The fixture ends with the reads before the backup, so any write would fail the replay.
+        let backup = std::env::temp_dir()
+            .join(format!(
+                "openkeychron-rgb-key-missing-{}",
+                std::process::id()
+            ))
+            .join("backup.json");
+        let output = rgb_key("cli-rgb-key-before-backup.toml", &backup, "A");
+        let stderr = stderr(&output);
+        assert!(!output.status.success());
+        assert!(
+            stderr.contains(&format!(
+                "cannot write the backup to {}: ",
+                backup.display()
+            )),
+            "{stderr}"
+        );
+        assert!(
+            stderr.trim_end().ends_with("; nothing was changed"),
+            "{stderr}"
+        );
+    }
 }
