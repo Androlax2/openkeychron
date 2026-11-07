@@ -1,6 +1,6 @@
 //! What every backup-guarded keymap and macro write shares: the supported-keyboard check
-//! (which `rgb key` uses too), the session around the write, and the failure and success
-//! messages naming the backup.
+//! (which `rgb` and `settings` writes use too), the session around the write, and the failure
+//! and success messages naming the backup.
 
 use std::path::Path;
 

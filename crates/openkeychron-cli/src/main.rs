@@ -69,12 +69,12 @@ enum Command {
         action: macros::MacroCommand,
     },
     /// Read or change the RGB effect, speed, brightness, colour and per-key colours. Writes only
-    /// over a USB cable.
+    /// to a cable V5 Max ISO.
     Rgb {
         #[command(subcommand)]
         action: rgb::RgbAction,
     },
-    /// Read or change debounce and Snap Click. Writes only over a USB cable.
+    /// Read or change debounce and Snap Click. Writes only to a cable V5 Max ISO.
     Settings {
         #[command(subcommand)]
         action: settings::SettingsAction,

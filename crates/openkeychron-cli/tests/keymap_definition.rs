@@ -87,6 +87,27 @@ mod tests {
                 backup,
             ],
             vec!["rgb", "key", "--backup", backup, "0,0", "0", "255"],
+            vec!["rgb", "set", "--backup", backup, "brightness", "128"],
+            vec!["rgb", "set", "--backup", backup, "effect", "1"],
+            vec!["rgb", "set", "--backup", backup, "speed", "10"],
+            vec!["rgb", "set", "--backup", backup, "color", "0", "255"],
+            vec![
+                "settings", "set", "--backup", backup, "debounce", "none", "0",
+            ],
+            vec![
+                "settings",
+                "set",
+                "--backup",
+                backup,
+                "snap-click",
+                "0",
+                "regular",
+                "0x04",
+                "0x07",
+            ],
+            vec![
+                "settings", "set", "--backup", backup, "wireless", "30", "3600",
+            ],
         ]
         .into_iter()
         .map(|command| command.into_iter().map(str::to_owned).collect())
@@ -281,6 +302,47 @@ mod tests {
                 "require the V5 Max ISO (3434:0951) on a USB cable; receiver and \
                  unverified-model writes are refused (got 3434:0950)",
             );
+        }
+    }
+
+    /// A V5 Max write session relabelled as the second model, so only the model check can
+    /// stop the write.
+    fn v5_max_session_as_second_model(name: &str) -> Fixture {
+        let mut fixture = Fixture::load(&synthetic(name)).unwrap();
+        assert_eq!(fixture.device.product_id, 0x0951, "{name}");
+        fixture.device.product_id = 0x0950;
+        fixture
+    }
+
+    #[test]
+    fn rgb_and_settings_writes_refuse_the_second_model_before_saving_a_backup() {
+        let sessions = [
+            (
+                "cli-rgb-set-brightness.toml",
+                "rgb",
+                &["brightness", "128"][..],
+            ),
+            (
+                "cli-settings-set-debounce.toml",
+                "settings",
+                &["debounce", "symmetric-eager-per-key", "10"],
+            ),
+            (
+                "cli-settings-set-wireless.toml",
+                "settings",
+                &["wireless", "30", "3600"],
+            ),
+        ];
+        for (name, command, value) in sessions {
+            let backup = temporary_path("json");
+            let mut arguments = vec![command, "set", "--backup", backup.to_str().unwrap()];
+            arguments.extend(value);
+            let output = run_without_layout(&arguments, &v5_max_session_as_second_model(name));
+            assert_refused(
+                &output,
+                "unverified-model writes are refused (got 3434:0950)",
+            );
+            assert!(!backup.exists(), "{name} saved {}", backup.display());
         }
     }
 
