@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use openkeychron_hid::KeychronDevice;
-use openkeychron_via::Via;
+use openkeychron_via::{EncoderDirection, Keycode, Via, ViaError};
 use serde::Serialize;
 
 use crate::session::{Session, SessionError};
@@ -27,38 +27,87 @@ pub(crate) struct WriteKind {
     pub(crate) backup_contents: &'static str,
 }
 
+/// The pre-change state a write saves to a new file before it sends anything.
+pub(crate) trait PreChangeSnapshot {
+    /// Saves to `path`, which must not exist yet.
+    fn save_new(&self, path: &Path) -> Result<(), SessionError>;
+}
+
+/// The reads a capture needs and no write: [`run`] lends the capture step only this, so no
+/// write can reach the keyboard before the pre-change backup is saved.
+pub(crate) struct ViaReader<'a>(&'a mut Via<Session>);
+
+impl<'a> ViaReader<'a> {
+    pub(crate) fn new(via: &'a mut Via<Session>) -> Self {
+        Self(via)
+    }
+
+    pub(crate) fn layer_count(&mut self) -> Result<u8, ViaError> {
+        self.0.layer_count()
+    }
+
+    pub(crate) fn layout_options(&mut self) -> Result<u32, ViaError> {
+        self.0.layout_options()
+    }
+
+    pub(crate) fn keymap(&mut self, key_count: usize) -> Result<Vec<Keycode>, ViaError> {
+        self.0.keymap(key_count)
+    }
+
+    pub(crate) fn encoder_keycode(
+        &mut self,
+        layer: u8,
+        encoder: u8,
+        direction: EncoderDirection,
+    ) -> Result<Keycode, ViaError> {
+        self.0.encoder_keycode(layer, encoder, direction)
+    }
+
+    pub(crate) fn macro_count(&mut self) -> Result<u8, ViaError> {
+        self.0.macro_count()
+    }
+
+    pub(crate) fn macro_buffer_size(&mut self) -> Result<u16, ViaError> {
+        self.0.macro_buffer_size()
+    }
+
+    pub(crate) fn macro_buffer(&mut self, size: u16) -> Result<Vec<u8>, ViaError> {
+        self.0.macro_buffer(size)
+    }
+}
+
 /// The new file that receives the pre-change state before the first write is sent.
-pub(crate) struct PreChangeBackup<'a> {
+struct PreChangeBackup<'a> {
     path: &'a Path,
     is_saved: bool,
 }
 
 impl PreChangeBackup<'_> {
-    /// Saves the pre-change state with `save_new`; from then on, a failure names the backup.
-    pub(crate) fn save(
-        &mut self,
-        save_new: impl FnOnce(&Path) -> Result<(), SessionError>,
-    ) -> Result<(), SessionError> {
-        save_new(self.path)?;
+    /// From a successful save on, a failure names the backup.
+    fn save(&mut self, snapshot: &impl PreChangeSnapshot) -> Result<(), SessionError> {
+        snapshot.save_new(self.path)?;
         self.is_saved = true;
         Ok(())
     }
 }
 
-/// Runs `write` against a supported cable keyboard and ends the session. Once `write` has
-/// saved the pre-change backup, every failure, an unfinished replay included, names that
-/// backup and the command that restores it.
-pub(crate) fn run(
+/// Runs a write against a supported cable keyboard and ends the session. `capture` reads the
+/// pre-change snapshot, and anything the write needs, or refuses; `run` saves the snapshot to
+/// `backup_path`, and only then hands `write` the [`Via`]. From the save on, every failure,
+/// an unfinished replay included, names that backup and the command that restores it.
+pub(crate) fn run<Snapshot, Plan, Capture, Write>(
     kind: &WriteKind,
     fixture: Option<&Path>,
     device: Option<&Path>,
     backup_path: &Path,
-    write: impl FnOnce(
-        &mut Via<Session>,
-        &KeychronDevice,
-        &mut PreChangeBackup<'_>,
-    ) -> Result<(), SessionError>,
-) -> Result<(), SessionError> {
+    capture: Capture,
+    write: Write,
+) -> Result<(), SessionError>
+where
+    Snapshot: PreChangeSnapshot,
+    Capture: FnOnce(&mut ViaReader<'_>, &KeychronDevice) -> Result<(Snapshot, Plan), SessionError>,
+    Write: FnOnce(&mut Via<Session>, &KeychronDevice, Snapshot, Plan) -> Result<(), SessionError>,
+{
     let session = Session::start(fixture, None, device)?;
     let identity = session.device().clone();
     let mut via = Via::new(session);
@@ -67,7 +116,10 @@ pub(crate) fn run(
         is_saved: false,
     };
     let result = if is_v5_max_iso_cable(&identity) {
-        write(&mut via, &identity, &mut backup)
+        capture(&mut ViaReader::new(&mut via), &identity).and_then(|(snapshot, plan)| {
+            backup.save(&snapshot)?;
+            write(&mut via, &identity, snapshot, plan)
+        })
     } else {
         Err(SessionError::Usage(kind.cable_refusal.to_owned()))
     };

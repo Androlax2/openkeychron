@@ -7,7 +7,7 @@ use clap::Args;
 use openkeychron_hid::KeychronDevice;
 use openkeychron_via::{EncoderDirection, Keycode, V5_MAX_FR_ISO, Via};
 
-use crate::guarded_write::{self, WriteKind};
+use crate::guarded_write::{self, ViaReader, WriteKind};
 use crate::keymap_backup::{BACKUP_VERSION, BackupDevice, EncoderPair, KeymapBackup, LAYOUT_ID};
 use crate::session::{Session, SessionError};
 
@@ -98,16 +98,18 @@ pub(crate) fn set(
         fixture,
         device,
         &args.backup,
-        |via, identity, backup| {
-            let mut expected = capture(via, identity, None)?;
-            if args.layer >= expected.layer_count {
+        |reader, identity| {
+            let previous = capture(reader, identity, None)?;
+            if args.layer >= previous.layer_count {
                 return Err(SessionError::Usage(format!(
                     "layer {} is unavailable; select 0..={}",
                     args.layer,
-                    expected.layer_count - 1
+                    previous.layer_count - 1
                 )));
             }
-            backup.save(|path| expected.save_new(path))?;
+            Ok((previous, ()))
+        },
+        |via, identity, mut expected, ()| {
             let offset = (usize::from(args.layer) * usize::from(expected.rows)
                 + usize::from(args.key.row))
                 * usize::from(expected.columns)
@@ -144,9 +146,8 @@ pub(crate) fn restore(
         fixture,
         device,
         &args.backup,
-        |via, identity, backup| {
-            let previous = capture(via, identity, Some(&wanted))?;
-            backup.save(|path| previous.save_new(path))?;
+        |reader, identity| Ok((capture(reader, identity, Some(&wanted))?, ())),
+        |via, identity, _previous, ()| {
             let matrix: Vec<_> = wanted.matrix.iter().copied().map(Keycode::from).collect();
             via.write_keymap(&matrix)
                 .map_err(|error| SessionError::via(&error, false))?;
@@ -190,13 +191,12 @@ pub(crate) fn reset(
         fixture,
         device,
         &args.backup,
-        |via, identity, backup| {
-            let previous = capture(via, identity, None)?;
-            // The defaults are unknown, so this verified backup is the only undo.
-            backup.save(|path| previous.save_new(path))?;
+        // The defaults are unknown, so the verified backup of this capture is the only undo.
+        |reader, identity| Ok((capture(reader, identity, None)?, ())),
+        |via, identity, previous, ()| {
             via.reset_keymap()
                 .map_err(|error| SessionError::via(&error, false))?;
-            capture(via, identity, Some(&previous)).map(|_| ())
+            capture(&mut ViaReader::new(via), identity, Some(&previous)).map(|_| ())
         },
     )?;
     guarded_write::print_success(
@@ -209,7 +209,7 @@ pub(crate) fn reset(
 }
 
 fn capture(
-    via: &mut Via<Session>,
+    via: &mut ViaReader<'_>,
     device: &KeychronDevice,
     expected: Option<&KeymapBackup>,
 ) -> Result<KeymapBackup, SessionError> {
@@ -277,7 +277,7 @@ fn verify(
     device: &KeychronDevice,
     expected: &KeymapBackup,
 ) -> Result<(), SessionError> {
-    if capture(via, device, Some(expected))? != *expected {
+    if capture(&mut ViaReader::new(via), device, Some(expected))? != *expected {
         return Err(SessionError::Usage(
             "complete matrix/encoder keymap verification did not match the expected state"
                 .to_owned(),
