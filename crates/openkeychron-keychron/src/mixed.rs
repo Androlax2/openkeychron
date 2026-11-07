@@ -12,7 +12,7 @@
 use openkeychron_hid::HidTransport;
 
 use crate::client::{Keychron, KeychronError, RGB_GROUP};
-use crate::perkey::SAVE;
+use crate::perkey::{MatrixSize, SAVE};
 
 const GET_INFO: u8 = 0x0B;
 const GET_REGIONS: u8 = 0x0C;
@@ -119,6 +119,20 @@ impl<T: HidTransport> MixedRgb<'_, T> {
     #[must_use]
     pub const fn effects_per_region(&self) -> u8 {
         self.effects_per_region
+    }
+
+    /// `A8 06` for every column of `row`: the first LED under each, `None` for a column
+    /// without one. Refuses a row outside `matrix` without sending.
+    pub fn leds_in_row(
+        &mut self,
+        matrix: MatrixSize,
+        row: u8,
+    ) -> Result<Vec<Option<u8>>, KeychronError> {
+        let every_column = 1u32
+            .checked_shl(u32::from(matrix.columns))
+            .map_or(u32::MAX, |bit| bit - 1);
+        self.keychron
+            .leds_under(self.led_count, matrix, row, every_column)
     }
 
     /// `A8 0C` for every LED, in requests of at most 29: the region each LED belongs to.
@@ -287,6 +301,12 @@ mod tests {
 
     use super::MixedEffect;
     use crate::client::{Keychron, KeychronError, REPORT_LEN};
+    use crate::perkey::MatrixSize;
+
+    const V5_MAX: MatrixSize = MatrixSize {
+        rows: 6,
+        columns: 19,
+    };
 
     /// `0xA2` reply with the V5 Max's feature bits: 0, 1, 2, 4, 5, 6, 7, 8 and 9.
     const FEATURES: [u8; 4] = [0xa2, 0x00, 0b1111_0111, 0b0000_0011];
@@ -679,6 +699,56 @@ mod tests {
             keychron.mixed_rgb().unwrap().set_effects(0, 0, &[unknown]),
             Err(KeychronError::Refused("0xa8 0x0f".to_owned()))
         );
+        assert_eq!(keychron.into_transport().finish(), Ok(()));
+    }
+
+    #[test]
+    fn reads_the_leds_of_a_whole_matrix_row_in_one_request() {
+        let mut leds = [0xffu8; 19];
+        leds[0] = 16;
+        leds[2] = 17;
+        let mut keychron = keychron(&[
+            v5_max_opening(),
+            exchange(
+                &[0xa8, 0x06, 1, 0xff, 0xff, 0x07],
+                &reply(&[0xa8, 0x06, 0x00], &leds),
+            ),
+        ]);
+        let mut expected = vec![None; 19];
+        expected[0] = Some(16);
+        expected[2] = Some(17);
+        assert_eq!(
+            keychron.mixed_rgb().unwrap().leds_in_row(V5_MAX, 1),
+            Ok(expected)
+        );
+        assert_eq!(keychron.into_transport().finish(), Ok(()));
+    }
+
+    #[test]
+    fn refuses_a_row_outside_the_matrix_without_sending() {
+        let mut keychron = keychron(&[v5_max_opening()]);
+        assert!(matches!(
+            keychron.mixed_rgb().unwrap().leds_in_row(V5_MAX, 6),
+            Err(KeychronError::Invalid(_))
+        ));
+        assert_eq!(keychron.into_transport().finish(), Ok(()));
+    }
+
+    #[test]
+    fn rejects_a_row_lookup_naming_an_led_past_the_led_count() {
+        let mut leds = [0xffu8; 19];
+        leds[18] = 98;
+        let mut keychron = keychron(&[
+            v5_max_opening(),
+            exchange(
+                &[0xa8, 0x06, 0, 0xff, 0xff, 0x07],
+                &reply(&[0xa8, 0x06, 0x00], &leds),
+            ),
+        ]);
+        assert!(matches!(
+            keychron.mixed_rgb().unwrap().leds_in_row(V5_MAX, 0),
+            Err(KeychronError::Invalid(_))
+        ));
         assert_eq!(keychron.into_transport().finish(), Ok(()));
     }
 

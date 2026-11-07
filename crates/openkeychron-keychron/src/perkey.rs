@@ -92,6 +92,55 @@ impl<T: HidTransport> Keychron<T> {
         }
         Ok(self.group(RGB_GROUP, GET_LED_COUNT, &[])?[3])
     }
+
+    /// `A8 06` for the columns of `row` set in `mask`: the first LED under each column of
+    /// `matrix`, `None` for a column without one or outside `mask`. Refuses a row outside
+    /// `matrix` without sending: the firmware's row check is off by one (`row > MATRIX_ROWS`).
+    pub(crate) fn leds_under(
+        &mut self,
+        led_count: u8,
+        matrix: MatrixSize,
+        row: u8,
+        mask: u32,
+    ) -> Result<Vec<Option<u8>>, KeychronError> {
+        if matrix.columns > LED_INDEX_COLUMNS {
+            return Err(KeychronError::Invalid(format!(
+                "a matrix of {} columns does not fit the {LED_INDEX_COLUMNS}-column LED lookup",
+                matrix.columns
+            )));
+        }
+        if row >= matrix.rows {
+            return Err(outside(matrix, row, 0));
+        }
+        let [mask_low, mask_middle, mask_high, _] = mask.to_le_bytes();
+        let reply = self.group(
+            RGB_GROUP,
+            GET_LED_INDEX,
+            &[row, mask_low, mask_middle, mask_high],
+        )?;
+        (0..matrix.columns)
+            .map(|column| {
+                if mask & (1 << column) == 0 {
+                    return Ok(None);
+                }
+                match reply[3 + usize::from(column)] {
+                    NO_LED => Ok(None),
+                    led if led < led_count => Ok(Some(led)),
+                    led => Err(KeychronError::Invalid(format!(
+                        "the keyboard puts matrix position {row},{column} on LED {led}, past its \
+                         {led_count} LEDs"
+                    ))),
+                }
+            })
+            .collect()
+    }
+}
+
+fn outside(matrix: MatrixSize, row: u8, column: u8) -> KeychronError {
+    KeychronError::Invalid(format!(
+        "matrix position {row},{column} is outside the {}x{} matrix",
+        matrix.rows, matrix.columns
+    ))
 }
 
 impl<T: HidTransport> PerKeyRgb<'_, T> {
@@ -109,30 +158,15 @@ impl<T: HidTransport> PerKeyRgb<'_, T> {
         row: u8,
         column: u8,
     ) -> Result<Option<u8>, KeychronError> {
-        if matrix.columns > LED_INDEX_COLUMNS {
-            return Err(KeychronError::Invalid(format!(
-                "a matrix of {} columns does not fit the {LED_INDEX_COLUMNS}-column LED lookup",
-                matrix.columns
-            )));
+        if column >= matrix.columns {
+            return Err(outside(matrix, row, column));
         }
-        if row >= matrix.rows || column >= matrix.columns {
-            return Err(KeychronError::Invalid(format!(
-                "matrix position {row},{column} is outside the {}x{} matrix",
-                matrix.rows, matrix.columns
-            )));
-        }
-        let mask = (1u32 << column).to_le_bytes();
-        let reply =
-            self.keychron
-                .group(RGB_GROUP, GET_LED_INDEX, &[row, mask[0], mask[1], mask[2]])?;
-        match reply[3 + usize::from(column)] {
-            NO_LED => Ok(None),
-            led if led < self.led_count => Ok(Some(led)),
-            led => Err(KeychronError::Invalid(format!(
-                "the keyboard puts matrix position {row},{column} on LED {led}, past its {} LEDs",
-                self.led_count
-            ))),
-        }
+        // Past the mask width, `leds_under` refuses the matrix before the mask is used.
+        let mask = 1u32.checked_shl(u32::from(column)).unwrap_or(0);
+        let leds = self
+            .keychron
+            .leds_under(self.led_count, matrix, row, mask)?;
+        Ok(leds[usize::from(column)])
     }
 
     /// `A8 09` for every LED, in requests of at most nine.
@@ -386,6 +420,20 @@ mod tests {
         };
         assert!(matches!(
             keychron.per_key_rgb().unwrap().led_index(matrix, 0, 24),
+            Err(KeychronError::Invalid(_))
+        ));
+        assert_eq!(keychron.into_transport().finish(), Ok(()));
+    }
+
+    #[test]
+    fn refuses_a_column_past_the_request_mask_width_without_sending() {
+        let mut keychron = keychron(&[opening(98)]);
+        let matrix = MatrixSize {
+            rows: 6,
+            columns: 40,
+        };
+        assert!(matches!(
+            keychron.per_key_rgb().unwrap().led_index(matrix, 0, 35),
             Err(KeychronError::Invalid(_))
         ));
         assert_eq!(keychron.into_transport().finish(), Ok(()));
