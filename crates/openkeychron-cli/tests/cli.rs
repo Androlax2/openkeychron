@@ -294,6 +294,80 @@ mod tests {
         );
     }
 
+    /// Sets pair 0 to regular on W and S, which was last-input on A and D, and returns the
+    /// saved backup with the command's output.
+    fn set_snap_click_pair_zero(fixture_name: &str, extra_arguments: &[&str]) -> (Output, String) {
+        let path = fixture(fixture_name);
+        let backup = std::env::temp_dir().join(format!(
+            "openkeychron-snap-click-backup-{}-{}.json",
+            fixture_name.trim_end_matches(".toml"),
+            std::process::id()
+        ));
+        let mut arguments = vec![
+            "settings",
+            "set",
+            "--backup",
+            backup.to_str().unwrap(),
+            "--fixture",
+            path.to_str().unwrap(),
+            "snap-click",
+            "0",
+            "regular",
+            "0x1a",
+            "0x16",
+        ];
+        arguments.extend_from_slice(extra_arguments);
+        let output = openkeychron(&arguments);
+        let saved = std::fs::read_to_string(&backup);
+        std::fs::remove_file(&backup).ok();
+        assert!(output.status.success(), "{}", stderr(&output));
+        (output, saved.unwrap())
+    }
+
+    fn assert_snap_click_backup_holds_last_input_on_a_and_d(saved: &str) {
+        let saved: serde_json::Value = serde_json::from_str(saved).unwrap();
+        assert_eq!(saved["snap_click"]["index"], 0);
+        assert_eq!(saved["snap_click"]["mode"], "last-input");
+        assert_eq!(saved["snap_click"]["keys"], serde_json::json!([0x04, 0x07]));
+    }
+
+    #[test]
+    fn settings_set_snap_click_saves_a_backup_and_prints_the_restore_command() {
+        let (output, saved) = set_snap_click_pair_zero("cli-settings-set-snap-click.toml", &[]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert_snap_click_backup_holds_last_input_on_a_and_d(&saved);
+        let text = stdout(&output);
+        assert!(
+            text.contains("Snap Click pair 0 set to regular, kept until power-off (not saved)."),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "openkeychron settings set --backup <NEW_FILE> snap-click 0 last-input 0x04 0x07\n"
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn settings_set_snap_click_with_save_adds_save_to_the_restore_command() {
+        let (output, saved) =
+            set_snap_click_pair_zero("cli-settings-set-snap-click-save.toml", &["--save"]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert_snap_click_backup_holds_last_input_on_a_and_d(&saved);
+        let text = stdout(&output);
+        assert!(
+            text.contains("Snap Click pair 0 set to regular, saved."),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "openkeychron settings set --backup <NEW_FILE> snap-click 0 last-input 0x04 0x07 --save\n"
+            ),
+            "{text}"
+        );
+    }
+
     #[test]
     fn settings_set_refuses_to_write_through_a_receiver() {
         let path = fixture("cli-info.toml");
