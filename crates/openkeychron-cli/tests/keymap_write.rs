@@ -875,4 +875,70 @@ mod tests {
             }
         }
     }
+
+    fn set_key(scratch: &Scratch, fixture: &Fixture, backup: &Path) -> Output {
+        run(
+            scratch,
+            fixture,
+            &[
+                "keymap",
+                "set",
+                "0",
+                "2,1",
+                "4",
+                "--backup",
+                backup.to_str().unwrap(),
+            ],
+        )
+    }
+
+    #[test]
+    fn write_refusal_message_names_the_only_supported_cable_keyboard() {
+        let scratch = Scratch::new();
+        let backup = scratch.path("before.json");
+        let mut fixture = fixture("cli-keymap-set.toml");
+        fixture.device.product_id = 0xd030;
+        fixture.events.clear();
+        let output = set_key(&scratch, &fixture, &backup);
+        assert_eq!(
+            stderr(&output),
+            "openkeychron: keymap writes require the V5 Max ISO (3434:0951) on a USB cable; \
+             receiver and unknown-layout writes are refused\n"
+        );
+    }
+
+    #[test]
+    fn write_failure_after_the_backup_names_it_and_the_restore_command() {
+        let scratch = Scratch::new();
+        let backup = scratch.path("before.json");
+        let mut fixture = fixture("cli-keymap-set.toml");
+        reply(&mut fixture, 35)[5] = 0x2a;
+        let output = set_key(&scratch, &fixture, &backup);
+        let backup = backup.display();
+        assert_eq!(
+            stderr(&output),
+            format!(
+                "openkeychron: complete matrix/encoder keymap verification did not match the \
+                 expected state; keymap state may have changed, and complete restoration was \
+                 not confirmed; pre-change matrix/encoder backup retained at {backup}; undo \
+                 with `openkeychron keymap restore {backup} --backup <NEW_FILE>`\n"
+            )
+        );
+    }
+
+    #[test]
+    fn write_success_text_names_the_backup_and_the_undo_command() {
+        let scratch = Scratch::new();
+        let backup = scratch.path("before.json");
+        let output = set_key(&scratch, &fixture("cli-keymap-set.toml"), &backup);
+        let backup = backup.display();
+        assert_eq!(
+            stdout(&output),
+            format!(
+                "Keymap set verified against the complete matrix/encoder snapshot.\n\
+                 Pre-change backup: {backup}\n\
+                 Undo with: openkeychron keymap restore {backup} --backup <NEW_FILE>\n"
+            )
+        );
+    }
 }

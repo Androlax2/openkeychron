@@ -6,10 +6,18 @@ use std::str::FromStr;
 use clap::Args;
 use openkeychron_hid::KeychronDevice;
 use openkeychron_via::{EncoderDirection, Keycode, V5_MAX_FR_ISO, Via};
-use serde::Serialize;
 
+use crate::guarded_write::{self, WriteKind};
 use crate::keymap_backup::{BACKUP_VERSION, BackupDevice, EncoderPair, KeymapBackup, LAYOUT_ID};
 use crate::session::{Session, SessionError};
+
+const KEYMAP_WRITE: WriteKind = WriteKind {
+    command: "keymap",
+    cable_refusal: "keymap writes require the V5 Max ISO (3434:0951) on a USB cable; receiver \
+                    and unknown-layout writes are refused",
+    failure_risk: "complete restoration was not confirmed",
+    backup_contents: "matrix/encoder",
+};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct KeyPosition {
@@ -73,12 +81,6 @@ fn parse_keycode(value: &str) -> Result<u16, String> {
         .map_err(|_| format!("expected a 16-bit decimal or hexadecimal keycode, got {value:?}"))
 }
 
-#[derive(Debug, Serialize)]
-struct EditOutput<'a> {
-    operation: &'static str,
-    backup: &'a Path,
-}
-
 pub(crate) fn set(
     args: &SetArgs,
     fixture: Option<&Path>,
@@ -91,39 +93,38 @@ pub(crate) fn set(
             args.key.row, args.key.column
         )));
     }
-    let session = Session::start(fixture, None, device)?;
-    let identity = session.device().clone();
-    let mut via = Via::new(session);
-    let mut has_backup = false;
-    let result = (|| {
-        let mut expected = capture(&mut via, &identity, None)?;
-        if args.layer >= expected.layer_count {
-            return Err(SessionError::Usage(format!(
-                "layer {} is unavailable; select 0..={}",
+    guarded_write::run(
+        &KEYMAP_WRITE,
+        fixture,
+        device,
+        &args.backup,
+        |via, identity, backup| {
+            let mut expected = capture(via, identity, None)?;
+            if args.layer >= expected.layer_count {
+                return Err(SessionError::Usage(format!(
+                    "layer {} is unavailable; select 0..={}",
+                    args.layer,
+                    expected.layer_count - 1
+                )));
+            }
+            backup.save(|path| expected.save_new(path))?;
+            let offset = (usize::from(args.layer) * usize::from(expected.rows)
+                + usize::from(args.key.row))
+                * usize::from(expected.columns)
+                + usize::from(args.key.column);
+            expected.matrix[offset] = args.keycode;
+            via.write_keycode(
                 args.layer,
-                expected.layer_count - 1
-            )));
-        }
-        expected.save_new(&args.backup)?;
-        has_backup = true;
-        let offset = (usize::from(args.layer) * usize::from(expected.rows)
-            + usize::from(args.key.row))
-            * usize::from(expected.columns)
-            + usize::from(args.key.column);
-        expected.matrix[offset] = args.keycode;
-        via.write_keycode(
-            args.layer,
-            args.key.row,
-            args.key.column,
-            Keycode::from(args.keycode),
-        )
-        .map_err(|error| SessionError::via(&error, false))?;
-        verify(&mut via, &identity, &expected)
-    })();
-    via.into_transport()
-        .complete(result)
-        .map_err(|error| edit_failure(error, has_backup, &args.backup))?;
-    print_success(
+                args.key.row,
+                args.key.column,
+                Keycode::from(args.keycode),
+            )
+            .map_err(|error| SessionError::via(&error, false))?;
+            verify(via, identity, &expected)
+        },
+    )?;
+    guarded_write::print_success(
+        &KEYMAP_WRITE,
         "set",
         "Keymap set verified against the complete matrix/encoder snapshot.",
         &args.backup,
@@ -138,40 +139,39 @@ pub(crate) fn restore(
     json: bool,
 ) -> Result<(), SessionError> {
     let wanted = KeymapBackup::load(&args.source)?;
-    let session = Session::start(fixture, None, device)?;
-    let identity = session.device().clone();
-    let mut via = Via::new(session);
-    let mut has_backup = false;
-    let result = (|| {
-        let previous = capture(&mut via, &identity, Some(&wanted))?;
-        previous.save_new(&args.backup)?;
-        has_backup = true;
-        let matrix: Vec<_> = wanted.matrix.iter().copied().map(Keycode::from).collect();
-        via.write_keymap(&matrix)
-            .map_err(|error| SessionError::via(&error, false))?;
-        for layer in 0..wanted.layer_count {
-            let pair = &wanted.encoders[usize::from(layer)];
-            via.write_encoder_keycode(
-                layer,
-                0,
-                EncoderDirection::Clockwise,
-                Keycode::from(pair.clockwise),
-            )
-            .map_err(|error| SessionError::via(&error, false))?;
-            via.write_encoder_keycode(
-                layer,
-                0,
-                EncoderDirection::CounterClockwise,
-                Keycode::from(pair.counter_clockwise),
-            )
-            .map_err(|error| SessionError::via(&error, false))?;
-        }
-        verify(&mut via, &identity, &wanted)
-    })();
-    via.into_transport()
-        .complete(result)
-        .map_err(|error| edit_failure(error, has_backup, &args.backup))?;
-    print_success(
+    guarded_write::run(
+        &KEYMAP_WRITE,
+        fixture,
+        device,
+        &args.backup,
+        |via, identity, backup| {
+            let previous = capture(via, identity, Some(&wanted))?;
+            backup.save(|path| previous.save_new(path))?;
+            let matrix: Vec<_> = wanted.matrix.iter().copied().map(Keycode::from).collect();
+            via.write_keymap(&matrix)
+                .map_err(|error| SessionError::via(&error, false))?;
+            for layer in 0..wanted.layer_count {
+                let pair = &wanted.encoders[usize::from(layer)];
+                via.write_encoder_keycode(
+                    layer,
+                    0,
+                    EncoderDirection::Clockwise,
+                    Keycode::from(pair.clockwise),
+                )
+                .map_err(|error| SessionError::via(&error, false))?;
+                via.write_encoder_keycode(
+                    layer,
+                    0,
+                    EncoderDirection::CounterClockwise,
+                    Keycode::from(pair.counter_clockwise),
+                )
+                .map_err(|error| SessionError::via(&error, false))?;
+            }
+            verify(via, identity, &wanted)
+        },
+    )?;
+    guarded_write::print_success(
+        &KEYMAP_WRITE,
         "restore",
         "Keymap restore verified against the complete matrix/encoder snapshot.",
         &args.backup,
@@ -185,23 +185,22 @@ pub(crate) fn reset(
     device: Option<&Path>,
     json: bool,
 ) -> Result<(), SessionError> {
-    let session = Session::start(fixture, None, device)?;
-    let identity = session.device().clone();
-    let mut via = Via::new(session);
-    let mut has_backup = false;
-    let result = (|| {
-        let previous = capture(&mut via, &identity, None)?;
-        // The defaults are unknown, so this verified backup is the only undo.
-        previous.save_new(&args.backup)?;
-        has_backup = true;
-        via.reset_keymap()
-            .map_err(|error| SessionError::via(&error, false))?;
-        capture(&mut via, &identity, Some(&previous)).map(|_| ())
-    })();
-    via.into_transport()
-        .complete(result)
-        .map_err(|error| edit_failure(error, has_backup, &args.backup))?;
-    print_success(
+    guarded_write::run(
+        &KEYMAP_WRITE,
+        fixture,
+        device,
+        &args.backup,
+        |via, identity, backup| {
+            let previous = capture(via, identity, None)?;
+            // The defaults are unknown, so this verified backup is the only undo.
+            backup.save(|path| previous.save_new(path))?;
+            via.reset_keymap()
+                .map_err(|error| SessionError::via(&error, false))?;
+            capture(via, identity, Some(&previous)).map(|_| ())
+        },
+    )?;
+    guarded_write::print_success(
+        &KEYMAP_WRITE,
         "reset",
         "Keymap reset to the firmware's default matrix and encoder keys.",
         &args.backup,
@@ -214,11 +213,6 @@ fn capture(
     device: &KeychronDevice,
     expected: Option<&KeymapBackup>,
 ) -> Result<KeymapBackup, SessionError> {
-    if device.is_receiver || device.vendor_id != 0x3434 || device.product_id != 0x0951 {
-        return Err(SessionError::Usage(
-            "keymap writes require the V5 Max ISO (3434:0951) on a USB cable; receiver and unknown-layout writes are refused".to_owned()
-        ));
-    }
     let layer_count = via
         .layer_count()
         .map_err(|error| SessionError::via(&error, false))?;
@@ -289,36 +283,5 @@ fn verify(
                 .to_owned(),
         ));
     }
-    Ok(())
-}
-
-fn edit_failure(error: SessionError, has_backup: bool, path: &Path) -> SessionError {
-    if !has_backup {
-        return error;
-    }
-    SessionError::Usage(format!(
-        "{error}; keymap state may have changed, and complete restoration was not confirmed; \
-         pre-change matrix/encoder backup retained at {}; \
-         undo with `openkeychron keymap restore {} --backup <NEW_FILE>`",
-        path.display(),
-        path.display()
-    ))
-}
-
-fn print_success(
-    operation: &'static str,
-    summary: &str,
-    backup: &Path,
-    json: bool,
-) -> Result<(), SessionError> {
-    if json {
-        return crate::print_json(&EditOutput { operation, backup });
-    }
-    println!("{summary}");
-    println!("Pre-change backup: {}", backup.display());
-    println!(
-        "Undo with: openkeychron keymap restore {} --backup <NEW_FILE>",
-        backup.display()
-    );
     Ok(())
 }

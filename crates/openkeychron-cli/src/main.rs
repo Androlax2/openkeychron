@@ -1,6 +1,7 @@
 //! openkeychron command-line tool.
 
 mod backup_file;
+mod guarded_write;
 mod keymap;
 mod keymap_backup;
 mod keymap_edit;
