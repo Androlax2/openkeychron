@@ -25,5 +25,5 @@ pub use keymap_write::EncoderDirection;
 pub use layout::{KeyboardLayout, Legends, PhysicalKey, Rectangle, V5_MAX_FR_ISO};
 pub use macro_text::{FRENCH_AZERTY, TextLayout, TypedStep};
 pub use macros::{MacroAction, MacroError, buffer_from_slots, decode_macro, encode_macro, slots};
-pub use registry::{DeviceRegistry, RegisteredLayout, RegistryError};
+pub use registry::{DeviceRegistry, RegisteredLayout, RegisteredModel, RegistryError, WriteAccess};
 pub use rgb::{RgbMatrix, RgbValue, brightness_to_store, stored_brightness};

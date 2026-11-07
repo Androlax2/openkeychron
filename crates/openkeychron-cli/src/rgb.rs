@@ -9,6 +9,7 @@ use openkeychron_keychron::{Keychron, KeychronError, MatrixSize, PerKeyColor};
 use openkeychron_via::{RgbMatrix, RgbValue, V5_MAX_FR_ISO, Via, brightness_to_store};
 use serde::Serialize;
 
+use crate::guarded_write;
 use crate::session::{Session, SessionError};
 
 #[derive(Debug, Subcommand)]
@@ -192,14 +193,7 @@ fn set_key(
     hue: u8,
     saturation: u8,
 ) -> Result<(), SessionError> {
-    let device = session.device();
-    // Legends and matrix positions are only known for this keyboard.
-    if device.vendor_id != 0x3434 || device.product_id != 0x0951 {
-        return Err(SessionError::Usage(format!(
-            "rgb key requires the V5 Max ISO keyboard (3434:0951); got {:04x}:{:04x}",
-            device.vendor_id, device.product_id
-        )));
-    }
+    guarded_write::require_write_verified("per-key RGB writes", session.device())?;
     let mut keychron = Keychron::new(session);
     let result = write_key_color(&mut keychron, backup, key, hue, saturation);
     keychron.into_transport().complete(result)

@@ -1,26 +1,64 @@
-//! What every backup-guarded keymap and macro write shares: the supported-keyboard check,
-//! the session around the write, and the failure and success messages naming the backup.
+//! What every backup-guarded keymap and macro write shares: the supported-keyboard check
+//! (which `rgb key` uses too), the session around the write, and the failure and success
+//! messages naming the backup.
 
 use std::path::Path;
 
 use openkeychron_hid::KeychronDevice;
-use openkeychron_via::{EncoderDirection, Keycode, Via, ViaError};
+use openkeychron_via::{
+    DeviceRegistry, EncoderDirection, Keycode, RegisteredModel, Via, ViaError, WriteAccess,
+};
 use serde::Serialize;
 
 use crate::session::{Session, SessionError};
 
-/// Whether `device` is the V5 Max ISO on a USB cable, the only keyboard whose layout is known.
-/// A receiver does not identify the keyboard behind it.
-pub(crate) fn is_v5_max_iso_cable(device: &KeychronDevice) -> bool {
-    !device.is_receiver && device.vendor_id == 0x3434 && device.product_id == 0x0951
+/// The model behind `vendor_id:product_id` when the built-in registry marks it as verified for
+/// writes. Only the built-in registry is asked, so a layout file passed with `--layout` can
+/// never enable a write.
+pub(crate) fn write_verified_model(vendor_id: u16, product_id: u16) -> Option<RegisteredModel> {
+    DeviceRegistry::built_in()
+        .model(vendor_id, product_id)
+        .filter(|model| model.write_access() == WriteAccess::VerifiedOverCable)
+        .cloned()
+}
+
+/// The verified models as `the V5 Max ISO (3434:0951)`, for refusal messages.
+pub(crate) fn write_verified_models_text() -> String {
+    DeviceRegistry::built_in()
+        .write_verified_models()
+        .map(|((vendor_id, product_id), model)| {
+            format!("the {} ({vendor_id:04x}:{product_id:04x})", model.name())
+        })
+        .collect::<Vec<_>>()
+        .join(" or ")
+}
+
+/// Refuses `device` unless it is on a USB cable and its model is verified for writes. A
+/// receiver does not identify the keyboard behind it. `writes` names what would be written,
+/// as in `keymap writes`.
+pub(crate) fn require_write_verified(
+    writes: &str,
+    device: &KeychronDevice,
+) -> Result<(), SessionError> {
+    if !device.is_receiver && write_verified_model(device.vendor_id, device.product_id).is_some() {
+        return Ok(());
+    }
+    let connection = if device.is_receiver { "receiver " } else { "" };
+    Err(SessionError::Usage(format!(
+        "{writes} require {models} on a USB cable; receiver and unverified-model writes are \
+         refused (got {connection}{vendor_id:04x}:{product_id:04x})",
+        models = write_verified_models_text(),
+        vendor_id = device.vendor_id,
+        product_id = device.product_id,
+    )))
 }
 
 /// The wording of one kind of backup-guarded write.
 pub(crate) struct WriteKind {
     /// The command that writes and restores this state: `keymap` or `macro`.
     pub(crate) command: &'static str,
-    /// The error when the device is not [`is_v5_max_iso_cable`].
-    pub(crate) cable_refusal: &'static str,
+    /// What is written, for [`require_write_verified`]: `keymap writes`.
+    pub(crate) writes: &'static str,
     /// What a write that fails after the backup can leave behind.
     pub(crate) failure_risk: &'static str,
     /// What the pre-change backup holds.
@@ -115,14 +153,12 @@ where
         path: backup_path,
         is_saved: false,
     };
-    let result = if is_v5_max_iso_cable(&identity) {
+    let result = require_write_verified(kind.writes, &identity).and_then(|()| {
         capture(&mut ViaReader::new(&mut via), &identity).and_then(|(snapshot, plan)| {
             backup.save(&snapshot)?;
             write(&mut via, &identity, snapshot, plan)
         })
-    } else {
-        Err(SessionError::Usage(kind.cable_refusal.to_owned()))
-    };
+    });
     via.into_transport()
         .complete(result)
         .map_err(|error| failure(kind, error, &backup))

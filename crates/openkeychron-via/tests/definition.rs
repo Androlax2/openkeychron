@@ -8,6 +8,7 @@ mod tests {
 
     use openkeychron_via::{
         DefinitionError, DefinitionKey, DeviceRegistry, Rectangle, RegistryError, ViaDefinition,
+        WriteAccess,
     };
 
     fn second_model_text() -> String {
@@ -337,5 +338,37 @@ mod tests {
             registry.layout(0x3434, 0x0951).unwrap().legend(2, 1),
             Some("A")
         );
+    }
+
+    #[test]
+    fn built_in_v5_max_iso_is_verified_for_writes_over_a_cable() {
+        let registry = DeviceRegistry::built_in();
+        let model = registry.model(0x3434, 0x0951).unwrap();
+        assert_eq!(
+            (model.name(), model.write_access()),
+            ("V5 Max ISO", WriteAccess::VerifiedOverCable)
+        );
+    }
+
+    #[test]
+    fn a_registered_definition_is_read_only() {
+        let mut registry = DeviceRegistry::built_in();
+        registry.register(second_model()).unwrap();
+        let model = registry.model(0x3434, 0x0950).unwrap();
+        assert_eq!(
+            (model.name(), model.write_access()),
+            ("Synthetic second model", WriteAccess::ReadOnly)
+        );
+    }
+
+    #[test]
+    fn write_verified_models_leave_out_a_registered_definition() {
+        let mut registry = DeviceRegistry::built_in();
+        registry.register(second_model()).unwrap();
+        let writable: Vec<_> = registry
+            .write_verified_models()
+            .map(|(id, model)| (id, model.name()))
+            .collect();
+        assert_eq!(writable, [((0x3434, 0x0951), "V5 Max ISO")]);
     }
 }

@@ -18,8 +18,7 @@ use crate::{DeviceOutput, device_output};
 
 const MACRO_WRITE: WriteKind = WriteKind {
     command: "macro",
-    cable_refusal: "macro writes require the V5 Max ISO (3434:0951) on a USB cable; receiver and \
-                    unknown-model writes are refused",
+    writes: "macro writes",
     failure_risk: "an unfinished write leaves every macro disabled",
     backup_contents: "macro",
 };

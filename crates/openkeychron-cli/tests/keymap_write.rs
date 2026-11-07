@@ -903,7 +903,7 @@ mod tests {
         assert_eq!(
             stderr(&output),
             "openkeychron: keymap writes require the V5 Max ISO (3434:0951) on a USB cable; \
-             receiver and unknown-layout writes are refused\n"
+             receiver and unverified-model writes are refused (got receiver 3434:d030)\n"
         );
     }
 

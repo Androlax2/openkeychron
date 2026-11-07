@@ -1,5 +1,6 @@
-//! Drives `keymap show --layout` with a hand-written VIA definition and replay for a second
-//! model, never a hardware session.
+//! Drives a second registered model, `3434:0950`, with a hand-written VIA definition and
+//! replay, never a hardware session: `keymap show --layout` reads it, and every write is
+//! refused because no write to it was verified on hardware.
 
 #[cfg(test)]
 mod tests {
@@ -34,18 +35,76 @@ mod tests {
     }
 
     fn run_fixture(arguments: &[&str], layout: &Path, fixture: &Fixture) -> Output {
+        let mut with_layout = arguments.to_vec();
+        let layout = layout.to_str().unwrap();
+        with_layout.extend(["--layout", layout]);
+        run_without_layout(&with_layout, fixture)
+    }
+
+    fn run_without_layout(arguments: &[&str], fixture: &Fixture) -> Output {
         let path = temporary_path("toml");
         fixture.save(&path).unwrap();
         let output = Command::new(env!("CARGO_BIN_EXE_openkeychron"))
             .args(arguments)
-            .arg("--layout")
-            .arg(layout)
             .arg("--fixture")
             .arg(&path)
             .output()
             .unwrap();
         std::fs::remove_file(path).unwrap();
         output
+    }
+
+    /// Every write command, saving its pre-change backup to `backup`.
+    fn write_commands(backup: &Path) -> Vec<Vec<String>> {
+        let backup = backup.to_str().unwrap();
+        let keymap_source = synthetic("keymap-backup.json");
+        let macro_source = synthetic("macro-backup.json");
+        [
+            vec!["keymap", "set", "0", "0,0", "0x04", "--backup", backup],
+            vec![
+                "keymap",
+                "restore",
+                keymap_source.to_str().unwrap(),
+                "--backup",
+                backup,
+            ],
+            vec!["keymap", "reset", "--backup", backup],
+            vec![
+                "macro",
+                "set",
+                "1",
+                "--host-layout",
+                "us",
+                "tap:0x2c",
+                "--backup",
+                backup,
+            ],
+            vec![
+                "macro",
+                "restore",
+                macro_source.to_str().unwrap(),
+                "--backup",
+                backup,
+            ],
+            vec!["rgb", "key", "--backup", backup, "0,0", "0", "255"],
+        ]
+        .into_iter()
+        .map(|command| command.into_iter().map(str::to_owned).collect())
+        .collect()
+    }
+
+    fn arguments(command: &[String]) -> Vec<&str> {
+        command.iter().map(String::as_str).collect()
+    }
+
+    /// A backup fixture naming the second model, in a temporary file.
+    fn backup_for_second_model(name: &str) -> PathBuf {
+        let text = std::fs::read_to_string(synthetic(name)).unwrap();
+        let from = r#""product_id": 2385"#;
+        assert!(text.contains(from), "{from} is not in {name}");
+        let path = temporary_path("json");
+        std::fs::write(&path, text.replace(from, r#""product_id": 2384"#)).unwrap();
+        path
     }
 
     /// The second model's definition with `from` replaced by `to`, in a temporary file.
@@ -207,6 +266,73 @@ mod tests {
         assert_refused(
             &output,
             &format!("cannot read layout file {}", layout.display()),
+        );
+    }
+
+    #[test]
+    fn every_write_to_the_second_model_is_refused_before_sending_reports() {
+        for command in write_commands(&temporary_path("json")) {
+            let output = run_without_layout(
+                &arguments(&command),
+                &without_events(second_model_fixture()),
+            );
+            assert_refused(
+                &output,
+                "require the V5 Max ISO (3434:0951) on a USB cable; receiver and \
+                 unverified-model writes are refused (got 3434:0950)",
+            );
+        }
+    }
+
+    #[test]
+    fn no_write_command_accepts_a_layout_file() {
+        for command in write_commands(&temporary_path("json")) {
+            let output = run_fixture(
+                &arguments(&command),
+                &second_model_definition(),
+                &without_events(second_model_fixture()),
+            );
+            assert_refused(&output, "unexpected argument '--layout'");
+        }
+    }
+
+    #[test]
+    fn a_keymap_backup_of_the_second_model_is_refused() {
+        let source = backup_for_second_model("keymap-backup.json");
+        let output = run_without_layout(
+            &[
+                "keymap",
+                "restore",
+                source.to_str().unwrap(),
+                "--backup",
+                temporary_path("json").to_str().unwrap(),
+            ],
+            &without_events(second_model_fixture()),
+        );
+        std::fs::remove_file(source).unwrap();
+        assert_refused(
+            &output,
+            "invalid keymap backup: device 3434:0950 is not a model verified for writes",
+        );
+    }
+
+    #[test]
+    fn a_macro_backup_of_the_second_model_is_refused() {
+        let source = backup_for_second_model("macro-backup.json");
+        let output = run_without_layout(
+            &[
+                "macro",
+                "restore",
+                source.to_str().unwrap(),
+                "--backup",
+                temporary_path("json").to_str().unwrap(),
+            ],
+            &without_events(second_model_fixture()),
+        );
+        std::fs::remove_file(source).unwrap();
+        assert_refused(
+            &output,
+            "invalid macro backup: device 3434:0950 is not a model verified for writes",
         );
     }
 }

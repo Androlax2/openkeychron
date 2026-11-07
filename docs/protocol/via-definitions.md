@@ -66,15 +66,19 @@ revision `2b493ff95f2665db719b1e95c91babb5036e72f3` (not committed, see above):
 - Loading `v5_max_iso_encoder.json` gives exactly the matrix positions, rectangles, second
   rectangles and encoder of the built-in `V5_MAX_FR_ISO` table, all 99 keys.
 
-## Reading only
+## Reading, and which models are written
 
-The registry says which layout to draw, not which keyboard is safe to write. `keymap show`
-uses it and still refuses a receiver, which does not identify the keyboard behind it. Keymap,
-macro and RGB writes stay limited to the V5 Max ISO on a USB cable until another model is
-verified on hardware (#91 moves those checks to the registry).
+The registry says which layout to draw, and each entry says on its own whether writes to that
+model were verified on hardware (`WriteAccess`). `keymap show` uses it and still refuses a
+receiver, which does not identify the keyboard behind it.
+
+Only the built-in V5 Max ISO is `VerifiedOverCable`. A definition registered from a file is
+always `ReadOnly`, and no write command accepts `--layout`, so a layout file never enables a
+write. Keymap and macro writes and `rgb key` ask the built-in registry for a write-verified
+model and refuse a receiver; keymap and macro backups must name a write-verified model.
 
 A definition for a model the registry already knows is refused, so a file cannot replace the
-built-in V5 Max ISO legends.
+built-in V5 Max ISO legends or its write access.
 
 ## Verification
 
