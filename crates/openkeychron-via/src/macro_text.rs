@@ -10,6 +10,9 @@ pub struct TextLayout {
     pub name: &'static str,
     keys: &'static [(char, Keystroke)],
     dead_keys: &'static [char],
+    /// Keys that are a dead key with at least one modifier. After one, the next keystroke
+    /// may type a composed character instead of its own.
+    dead_keycodes: &'static [u8],
 }
 
 /// What a step of a macro types on a host with a given [`TextLayout`].
@@ -31,6 +34,8 @@ struct Keystroke {
 /// <https://github.com/Keychron/qmk_firmware/blob/2b493ff95f2665db719b1e95c91babb5036e72f3/quantum/keycodes.h>.
 const SHIFT: u8 = 0xe1;
 const ALT_GR: u8 = 0xe6;
+/// `KC_LEFT_CTRL` to `KC_RIGHT_GUI` in the same file.
+const MODIFIER_KEYCODES: std::ops::RangeInclusive<u8> = 0xe0..=0xe7;
 
 const fn plain(keycode: u8) -> Keystroke {
     Keystroke {
@@ -165,6 +170,8 @@ pub const FRENCH_AZERTY: TextLayout = TextLayout {
         ('¤', alt_gr(0x30)),
     ],
     dead_keys: &['^', '¨', '~', '`'],
+    // `^` and `¨` (KC_LBRC), AltGr `~` (KC_2) and AltGr `` ` `` (KC_7).
+    dead_keycodes: &[0x2f, 0x1f, 0x24],
 };
 
 impl TextLayout {
@@ -192,14 +199,18 @@ impl TextLayout {
 
     /// The macro as this layout types it. Tap, down and up actions become text when they are
     /// keystrokes this layout types characters with; everything else stays an action. Once a
-    /// key stays held, later taps stay actions too: they type with that key still down.
+    /// key stays held, later taps stay actions too: they type with that key still down. After
+    /// a possible dead key, or firmware text whose last key is unknown here, the next
+    /// keystroke stays an action too: the host may compose it into another character.
     #[must_use]
     pub fn typed_steps(&self, actions: &[MacroAction]) -> Vec<TypedStep> {
         let mut steps = Vec::new();
         let mut held_keys = Vec::new();
+        let mut may_compose = false;
         let mut index = 0;
         while let Some(action) = actions.get(index) {
             if held_keys.is_empty()
+                && !may_compose
                 && let Some((text, length)) = self.typed_run(&actions[index..])
             {
                 match steps.last_mut() {
@@ -210,9 +221,14 @@ impl TextLayout {
                 continue;
             }
             match action {
-                MacroAction::Down(key) => held_keys.push(*key),
+                MacroAction::Down(key) => {
+                    held_keys.push(*key);
+                    may_compose = self.may_compose_after(*key, may_compose);
+                }
                 MacroAction::Up(key) => held_keys.retain(|held| held != key),
-                _ => {}
+                MacroAction::Tap(key) => may_compose = self.may_compose_after(*key, may_compose),
+                MacroAction::Text(_) => may_compose = true,
+                MacroAction::Delay(_) => {}
             }
             steps.push(TypedStep::Action(action.clone()));
             index += 1;
@@ -242,6 +258,14 @@ impl TextLayout {
             }
             _ => None,
         }
+    }
+
+    /// A modifier leaves a pending dead key pending; any other key starts or ends one.
+    fn may_compose_after(&self, keycode: u8, may_compose: bool) -> bool {
+        if MODIFIER_KEYCODES.contains(&keycode) {
+            return may_compose;
+        }
+        self.dead_keycodes.contains(&keycode)
     }
 
     fn keystroke(&self, character: char) -> Result<Keystroke, MacroError> {
@@ -432,6 +456,53 @@ mod tests {
                 TypedStep::Action(MacroAction::Delay(5)),
                 TypedStep::Action(MacroAction::Text("a".to_owned())),
                 TypedStep::Action(MacroAction::Tap(0x2f)),
+            ]
+        );
+    }
+
+    #[test]
+    fn keeps_keystrokes_after_a_dead_key_as_actions_until_a_key_consumes_it() {
+        let actions = vec![
+            MacroAction::Down(ALT_GR),
+            MacroAction::Tap(0x1f),
+            MacroAction::Up(ALT_GR),
+            MacroAction::Tap(0x08),
+            MacroAction::Tap(0x08),
+        ];
+        let mut expected: Vec<TypedStep> = actions[..4]
+            .iter()
+            .cloned()
+            .map(TypedStep::Action)
+            .collect();
+        expected.push(TypedStep::Text("e".to_owned()));
+        assert_eq!(FRENCH_AZERTY.typed_steps(&actions), expected);
+    }
+
+    #[test]
+    fn keeps_a_plain_tap_after_the_circumflex_dead_key_as_an_action() {
+        let actions = vec![MacroAction::Tap(0x2f), MacroAction::Tap(0x08)];
+        assert_eq!(
+            FRENCH_AZERTY.typed_steps(&actions),
+            vec![
+                TypedStep::Action(MacroAction::Tap(0x2f)),
+                TypedStep::Action(MacroAction::Tap(0x08)),
+            ]
+        );
+    }
+
+    #[test]
+    fn keeps_keystrokes_right_after_firmware_text_as_actions() {
+        let actions = vec![
+            MacroAction::Text("[".to_owned()),
+            MacroAction::Tap(0x08),
+            MacroAction::Tap(0x08),
+        ];
+        assert_eq!(
+            FRENCH_AZERTY.typed_steps(&actions),
+            vec![
+                TypedStep::Action(MacroAction::Text("[".to_owned())),
+                TypedStep::Action(MacroAction::Tap(0x08)),
+                TypedStep::Text("e".to_owned()),
             ]
         );
     }

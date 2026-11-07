@@ -193,7 +193,13 @@ fn host_actions(
     host_layout: Option<HostLayout>,
 ) -> Result<Vec<MacroAction>, SessionError> {
     let mut expanded = Vec::new();
+    let mut held_keys = Vec::new();
     for action in actions {
+        match action {
+            MacroAction::Down(key) => held_keys.push(*key),
+            MacroAction::Up(key) => held_keys.retain(|held| held != key),
+            _ => {}
+        }
         let MacroAction::Text(text) = action else {
             expanded.push(action.clone());
             continue;
@@ -205,14 +211,23 @@ fn host_actions(
                     .to_owned(),
             )
         })?;
-        match host_layout.text_layout() {
-            Some(layout) => expanded.extend(
-                layout
-                    .actions_for_text(text)
-                    .map_err(|error| SessionError::Usage(error.to_string()))?,
-            ),
-            None => expanded.push(action.clone()),
+        let Some(layout) = host_layout.text_layout() else {
+            expanded.push(action.clone());
+            continue;
+        };
+        // The keystrokes press and release their own modifiers, so a key held around them
+        // would change or cancel what they type.
+        if let Some(held) = held_keys.first() {
+            return Err(SessionError::Usage(format!(
+                "text:{text:?} comes while down:0x{held:02x} is still held, which changes what \
+                 it types; release it with up:0x{held:02x} before the text"
+            )));
         }
+        expanded.extend(
+            layout
+                .actions_for_text(text)
+                .map_err(|error| SessionError::Usage(error.to_string()))?,
+        );
     }
     Ok(expanded)
 }

@@ -623,6 +623,34 @@ mod tests {
     }
 
     #[test]
+    fn macro_set_refuses_french_text_while_an_earlier_key_is_held_before_opening_a_session() {
+        let scratch = Scratch::new();
+        let backup = scratch.path("before.json");
+        let output = run(
+            &scratch,
+            &no_reports(0x0951),
+            &[
+                "macro",
+                "set",
+                "0",
+                "--host-layout",
+                "fr",
+                "down:0xe1",
+                "text:1a",
+                "up:0xe1",
+                "--backup",
+                backup.to_str().unwrap(),
+            ],
+        );
+        assert_eq!(
+            stderr(&output),
+            "openkeychron: text:\"1a\" comes while down:0xe1 is still held, which changes what \
+             it types; release it with up:0xe1 before the text\n"
+        );
+        assert!(!backup.exists());
+    }
+
+    #[test]
     fn macro_list_with_french_host_layout_shows_keystrokes_as_the_text_they_type() {
         let scratch = Scratch::new();
         let output = run(

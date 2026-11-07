@@ -197,7 +197,7 @@ The firmware types macro text through the US-ANSI `ascii_to_keycode_lut`, so `te
 `text:` action:
 
 - `fr` turns the text into the tap/down/up keystrokes that type it on French AZERTY, from
-  QMK's `keymap_french.h`. Shift and AltGr characters are wrapped in their modifier.
+  QMK's `keymap_french.h` (the Windows and Linux layout; macOS French differs). Shift and AltGr characters are wrapped in their modifier.
 - `us` keeps firmware text bytes, as VIA writes them.
 
 Characters that need a dead key (`^`, `¨`, `~`, `` ` ``) or have no key on the layout are
