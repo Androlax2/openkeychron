@@ -19,7 +19,7 @@ pub enum SettingsAction {
     /// Change one setting. Saves the previous value to --backup first and reads the new one back.
     Set {
         /// New file to save the previous value to before writing (JSON). An existing file is refused.
-        #[arg(long, value_name = "FILE")]
+        #[arg(long, value_name = "FILE", conflicts_with = "record")]
         backup: PathBuf,
 
         #[command(subcommand)]
@@ -124,6 +124,12 @@ pub fn run(
     device: Option<&Path>,
     json: bool,
 ) -> Result<(), SessionError> {
+    if record.is_some() && matches!(action, SettingsAction::Set { .. }) {
+        return Err(SessionError::Usage(
+            "--record is not supported for settings set; it must not overwrite a protected backup"
+                .to_owned(),
+        ));
+    }
     let session = Session::start(fixture, record, device)?;
     if matches!(action, SettingsAction::Set { .. }) {
         guarded_write::require_write_verified("settings writes", session.device())?;
