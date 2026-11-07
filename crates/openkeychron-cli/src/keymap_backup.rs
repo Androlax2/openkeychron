@@ -2,11 +2,11 @@
 
 use std::path::Path;
 
-use openkeychron_via::V5_MAX_FR_ISO;
+use openkeychron_via::RegisteredModel;
 use serde::{Deserialize, Serialize};
 
 use crate::backup_file;
-use crate::guarded_write::PreChangeSnapshot;
+use crate::guarded_write::{self, PreChangeSnapshot};
 use crate::session::SessionError;
 
 pub(crate) const BACKUP_VERSION: u32 = 1;
@@ -17,6 +17,21 @@ pub(crate) const LAYOUT_ID: &str = "v5-max-fr-iso";
 pub(crate) struct BackupDevice {
     pub vendor_id: u16,
     pub product_id: u16,
+}
+
+impl BackupDevice {
+    /// The model this backup names, or why it is refused: a backup is only ever restored by
+    /// writing it, so its model must be verified for writes.
+    pub fn write_verified_model(&self) -> Result<RegisteredModel, String> {
+        guarded_write::write_verified_model(self.vendor_id, self.product_id).ok_or_else(|| {
+            format!(
+                "device {:04x}:{:04x} is not a model verified for writes; supported: {}",
+                self.vendor_id,
+                self.product_id,
+                guarded_write::write_verified_models_text()
+            )
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -46,15 +61,11 @@ impl KeymapBackup {
         if self.format_version != BACKUP_VERSION {
             return Err(invalid("unsupported format_version"));
         }
-        if self.device.vendor_id != 0x3434 || self.device.product_id != 0x0951 {
-            return Err(invalid(
-                "device identity does not match the cable V5 Max ISO",
-            ));
-        }
+        let model = self.device.write_verified_model().map_err(invalid)?;
         if self.layout != LAYOUT_ID
             || self.layout_options != 0
-            || self.rows != V5_MAX_FR_ISO.rows
-            || self.columns != V5_MAX_FR_ISO.columns
+            || self.rows != model.layout().rows()
+            || self.columns != model.layout().columns()
             || self.encoder_count != 1
             || self.layer_count == 0
         {

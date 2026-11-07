@@ -13,8 +13,7 @@ use crate::session::{Session, SessionError};
 
 const KEYMAP_WRITE: WriteKind = WriteKind {
     command: "keymap",
-    cable_refusal: "keymap writes require the V5 Max ISO (3434:0951) on a USB cable; receiver \
-                    and unknown-layout writes are refused",
+    writes: "keymap writes",
     failure_risk: "complete restoration was not confirmed",
     backup_contents: "matrix/encoder",
 };

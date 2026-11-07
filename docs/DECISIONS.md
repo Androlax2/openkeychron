@@ -235,3 +235,9 @@ Rejected:
 
 Test definitions are hand-written synthetic files, not copies of upstream ones. See
 `docs/protocol/via-definitions.md`.
+
+Added on 2026-11-07 with #91, at Theo's request: each registry entry says whether writes to
+that model were verified on hardware (`WriteAccess`). Only the built-in V5 Max ISO is
+`VerifiedOverCable`; a definition registered from a file is always `ReadOnly`. Keymap and
+macro writes, `rgb key` and backup validation ask only the built-in registry, and no write
+command takes `--layout`, so a layout file never enables a write. Receivers stay refused.

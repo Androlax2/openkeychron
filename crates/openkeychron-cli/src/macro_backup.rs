@@ -27,11 +27,7 @@ impl MacroBackup {
         if self.format_version != BACKUP_VERSION {
             return Err(invalid("unsupported format_version"));
         }
-        if self.device.vendor_id != 0x3434 || self.device.product_id != 0x0951 {
-            return Err(invalid(
-                "device identity does not match the cable V5 Max ISO",
-            ));
-        }
+        self.device.write_verified_model().map_err(invalid)?;
         if self.buffer_size == 0 || self.buffer.len() != usize::from(self.buffer_size) {
             return Err(invalid("buffer length does not match buffer_size"));
         }
