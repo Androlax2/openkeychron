@@ -7,10 +7,19 @@ use openkeychron_hid::KeychronDevice;
 use openkeychron_via::{MacroAction, Via, buffer_from_slots, decode_macro, encode_macro, slots};
 use serde::Serialize;
 
+use crate::guarded_write::{self, WriteKind};
 use crate::keymap_backup::BackupDevice;
 use crate::macro_backup::{BACKUP_VERSION, MacroBackup};
 use crate::session::{Session, SessionError};
 use crate::{DeviceOutput, device_output};
+
+const MACRO_WRITE: WriteKind = WriteKind {
+    command: "macro",
+    cable_refusal: "macro writes require the V5 Max ISO (3434:0951) on a USB cable; receiver and \
+                    unknown-model writes are refused",
+    failure_risk: "an unfinished write leaves every macro disabled",
+    backup_contents: "macro",
+};
 
 #[derive(Debug, Subcommand)]
 pub enum MacroCommand {
@@ -118,12 +127,6 @@ impl From<MacroAction> for ActionOutput {
             MacroAction::Delay(milliseconds) => Self::Delay(milliseconds),
         }
     }
-}
-
-#[derive(Debug, Serialize)]
-struct EditOutput<'a> {
-    operation: &'static str,
-    backup: &'a Path,
 }
 
 pub fn run(
@@ -236,45 +239,45 @@ fn set(
 ) -> Result<(), SessionError> {
     let encoded =
         encode_macro(&args.actions).map_err(|error| SessionError::Usage(error.to_string()))?;
-    let session = Session::start(fixture, None, device)?;
-    let identity = session.device().clone();
-    let mut via = Via::new(session);
-    let mut has_backup = false;
-    let result = (|| {
-        let previous = capture(&mut via, &identity, None)?;
-        if !previous.macros_enabled() {
-            return Err(SessionError::Usage(
-                "the macro buffer's last byte is not 0, so an earlier write did not finish and \
-                 its content is unknown; run `openkeychron macro restore` with a backup first"
-                    .to_owned(),
-            ));
-        }
-        if previous.macro_count == 0 {
-            return Err(SessionError::Usage(
-                "the keyboard reports no macro slots".to_owned(),
-            ));
-        }
-        if args.slot >= previous.macro_count {
-            return Err(SessionError::Usage(format!(
-                "macro slot {} is unavailable; select 0..={}",
-                args.slot,
-                previous.macro_count - 1
-            )));
-        }
-        let mut macros = slots(&previous.buffer, previous.macro_count);
-        macros[usize::from(args.slot)] = encoded;
-        let buffer = buffer_from_slots(&macros, previous.buffer.len())
-            .map_err(|error| SessionError::Usage(error.to_string()))?;
-        previous.save_new(&args.backup)?;
-        has_backup = true;
-        via.write_macro_buffer(&buffer)
-            .map_err(|error| SessionError::via(&error, false))?;
-        verify(&mut via, &identity, &MacroBackup { buffer, ..previous })
-    })();
-    via.into_transport()
-        .complete(result)
-        .map_err(|error| edit_failure(error, has_backup, &args.backup))?;
-    print_success(
+    guarded_write::run(
+        &MACRO_WRITE,
+        fixture,
+        device,
+        &args.backup,
+        |via, identity, backup| {
+            let previous = capture(via, identity, None)?;
+            if !previous.macros_enabled() {
+                return Err(SessionError::Usage(
+                    "the macro buffer's last byte is not 0, so an earlier write did not finish \
+                     and its content is unknown; run `openkeychron macro restore` with a backup \
+                     first"
+                        .to_owned(),
+                ));
+            }
+            if previous.macro_count == 0 {
+                return Err(SessionError::Usage(
+                    "the keyboard reports no macro slots".to_owned(),
+                ));
+            }
+            if args.slot >= previous.macro_count {
+                return Err(SessionError::Usage(format!(
+                    "macro slot {} is unavailable; select 0..={}",
+                    args.slot,
+                    previous.macro_count - 1
+                )));
+            }
+            let mut macros = slots(&previous.buffer, previous.macro_count);
+            macros[usize::from(args.slot)] = encoded;
+            let buffer = buffer_from_slots(&macros, previous.buffer.len())
+                .map_err(|error| SessionError::Usage(error.to_string()))?;
+            backup.save(|path| previous.save_new(path))?;
+            via.write_macro_buffer(&buffer)
+                .map_err(|error| SessionError::via(&error, false))?;
+            verify(via, identity, &MacroBackup { buffer, ..previous })
+        },
+    )?;
+    guarded_write::print_success(
+        &MACRO_WRITE,
         "set",
         &format!(
             "Macro M{} set and the whole macro buffer verified.",
@@ -299,22 +302,21 @@ fn restore(
             args.source.display()
         )));
     }
-    let session = Session::start(fixture, None, device)?;
-    let identity = session.device().clone();
-    let mut via = Via::new(session);
-    let mut has_backup = false;
-    let result = (|| {
-        let previous = capture(&mut via, &identity, Some(&wanted))?;
-        previous.save_new(&args.backup)?;
-        has_backup = true;
-        via.write_macro_buffer(&wanted.buffer)
-            .map_err(|error| SessionError::via(&error, false))?;
-        verify(&mut via, &identity, &wanted)
-    })();
-    via.into_transport()
-        .complete(result)
-        .map_err(|error| edit_failure(error, has_backup, &args.backup))?;
-    print_success(
+    guarded_write::run(
+        &MACRO_WRITE,
+        fixture,
+        device,
+        &args.backup,
+        |via, identity, backup| {
+            let previous = capture(via, identity, Some(&wanted))?;
+            backup.save(|path| previous.save_new(path))?;
+            via.write_macro_buffer(&wanted.buffer)
+                .map_err(|error| SessionError::via(&error, false))?;
+            verify(via, identity, &wanted)
+        },
+    )?;
+    guarded_write::print_success(
+        &MACRO_WRITE,
         "restore",
         "Macro buffer restored and verified.",
         &args.backup,
@@ -329,13 +331,6 @@ fn capture(
     device: &KeychronDevice,
     expected: Option<&MacroBackup>,
 ) -> Result<MacroBackup, SessionError> {
-    if device.is_receiver || device.vendor_id != 0x3434 || device.product_id != 0x0951 {
-        return Err(SessionError::Usage(
-            "macro writes require the V5 Max ISO (3434:0951) on a USB cable; receiver and \
-             unknown-model writes are refused"
-                .to_owned(),
-        ));
-    }
     let via_error = |error| SessionError::via(&error, false);
     let macro_count = via.macro_count().map_err(via_error)?;
     let buffer_size = via.macro_buffer_size().map_err(via_error)?;
@@ -371,36 +366,5 @@ fn verify(
             "macro buffer verification did not match the expected state".to_owned(),
         ));
     }
-    Ok(())
-}
-
-fn edit_failure(error: SessionError, has_backup: bool, path: &Path) -> SessionError {
-    if !has_backup {
-        return error;
-    }
-    SessionError::Usage(format!(
-        "{error}; macro state may have changed, and an unfinished write leaves every macro \
-         disabled; pre-change macro backup retained at {}; undo with \
-         `openkeychron macro restore {} --backup <NEW_FILE>`",
-        path.display(),
-        path.display()
-    ))
-}
-
-fn print_success(
-    operation: &'static str,
-    summary: &str,
-    backup: &Path,
-    json: bool,
-) -> Result<(), SessionError> {
-    if json {
-        return crate::print_json(&EditOutput { operation, backup });
-    }
-    println!("{summary}");
-    println!("Pre-change backup: {}", backup.display());
-    println!(
-        "Undo with: openkeychron macro restore {} --backup <NEW_FILE>",
-        backup.display()
-    );
     Ok(())
 }

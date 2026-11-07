@@ -6,6 +6,7 @@ use clap::Subcommand;
 use openkeychron_via::{V5_MAX_FR_ISO, Via};
 use serde::Serialize;
 
+use crate::guarded_write::is_v5_max_iso_cable;
 use crate::session::{Session, SessionError};
 use crate::{DeviceOutput, device_output};
 
@@ -85,8 +86,7 @@ fn query(session: Session, selected_layer: Option<u8>) -> Result<KeymapOutput, S
     let device = session.device().clone();
     let mut via = Via::new(session);
     let result = (|| {
-        // Only this cable identity has known geometry; a receiver does not identify its keyboard.
-        if device.is_receiver || device.vendor_id != 0x3434 || device.product_id != 0x0951 {
+        if !is_v5_max_iso_cable(&device) {
             return Err(SessionError::Usage(format!(
                 "keymap show requires the V5 Max ISO keyboard (3434:0951) on a USB cable; \
                  got {:04x}:{:04x}",

@@ -486,4 +486,52 @@ mod tests {
             assert!(!recording.exists());
         }
     }
+
+    #[test]
+    fn macro_write_refusal_message_names_the_only_supported_cable_keyboard() {
+        let scratch = Scratch::new();
+        let backup = scratch.path("before.json");
+        let output = set(&scratch, &no_reports(0xd030), &backup);
+        assert_eq!(
+            stderr(&output),
+            "openkeychron: macro writes require the V5 Max ISO (3434:0951) on a USB cable; \
+             receiver and unknown-model writes are refused\n"
+        );
+    }
+
+    #[test]
+    fn macro_write_failure_after_the_backup_names_it_and_the_restore_command() {
+        let scratch = Scratch::new();
+        let backup = scratch.path("before.json");
+        let mut fixture = fixture("cli-macro-set.toml");
+        let final_chunk = fixture.events.len() - 3;
+        reply(&mut fixture, final_chunk)[4] = b'j';
+        let output = set(&scratch, &fixture, &backup);
+        let backup = backup.display();
+        assert_eq!(
+            stderr(&output),
+            format!(
+                "openkeychron: macro buffer verification did not match the expected state; \
+                 macro state may have changed, and an unfinished write leaves every macro \
+                 disabled; pre-change macro backup retained at {backup}; undo with \
+                 `openkeychron macro restore {backup} --backup <NEW_FILE>`\n"
+            )
+        );
+    }
+
+    #[test]
+    fn macro_write_success_text_names_the_backup_and_the_undo_command() {
+        let scratch = Scratch::new();
+        let backup = scratch.path("before.json");
+        let output = set(&scratch, &fixture("cli-macro-set.toml"), &backup);
+        let backup = backup.display();
+        assert_eq!(
+            stdout(&output),
+            format!(
+                "Macro M1 set and the whole macro buffer verified.\n\
+                 Pre-change backup: {backup}\n\
+                 Undo with: openkeychron macro restore {backup} --backup <NEW_FILE>\n"
+            )
+        );
+    }
 }
