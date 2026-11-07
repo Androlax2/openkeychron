@@ -61,6 +61,15 @@ mod tests {
         fixture
     }
 
+    /// The full capture `macro set` ends with, as a `macro list` session.
+    fn final_capture(name: &str) -> Fixture {
+        let mut fixture = fixture(name);
+        fixture
+            .events
+            .drain(..fixture.events.len() - CAPTURE_EVENTS);
+        fixture
+    }
+
     fn no_reports(product_id: u16) -> Fixture {
         let mut fixture = fixture("cli-macro-set.toml");
         fixture.events.clear();
@@ -105,6 +114,8 @@ mod tests {
                 "macro",
                 "set",
                 "1",
+                "--host-layout",
+                "us",
                 "text:hi",
                 "tap:0x2c",
                 "delay:50",
@@ -234,6 +245,8 @@ mod tests {
                 "macro",
                 "set",
                 "1",
+                "--host-layout",
+                "us",
                 "text:hi",
                 "tap:0x2c",
                 "delay:50",
@@ -299,6 +312,8 @@ mod tests {
                 "macro",
                 "set",
                 "1",
+                "--host-layout",
+                "us",
                 "text:this text is far too long",
                 "--backup",
                 backup.to_str().unwrap(),
@@ -532,6 +547,158 @@ mod tests {
                  Pre-change backup: {backup}\n\
                  Undo with: openkeychron macro restore {backup} --backup <NEW_FILE>\n"
             )
+        );
+    }
+
+    #[test]
+    fn macro_set_types_french_text_as_azerty_keystrokes() {
+        let scratch = Scratch::new();
+        let backup = scratch.path("before.json");
+        let output = run(
+            &scratch,
+            &fixture("cli-macro-set-fr.toml"),
+            &[
+                "macro",
+                "set",
+                "0",
+                "--host-layout",
+                "fr",
+                "text:Aé1@",
+                "--backup",
+                backup.to_str().unwrap(),
+            ],
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert_eq!(saved_backup(&backup)["buffer"][2], u32::from(b'h'));
+    }
+
+    #[test]
+    fn macro_set_refuses_text_without_a_host_layout_before_opening_a_session() {
+        let scratch = Scratch::new();
+        let backup = scratch.path("before.json");
+        let output = run(
+            &scratch,
+            &no_reports(0x0951),
+            &[
+                "macro",
+                "set",
+                "0",
+                "text:hi",
+                "--backup",
+                backup.to_str().unwrap(),
+            ],
+        );
+        assert_eq!(
+            stderr(&output),
+            "openkeychron: text actions need --host-layout: `fr` types them as French AZERTY \
+             keystrokes, `us` stores text the firmware types as US-ANSI keycodes\n"
+        );
+        assert!(!backup.exists());
+    }
+
+    #[test]
+    fn macro_set_refuses_a_character_the_french_layout_cannot_type_before_opening_a_session() {
+        let scratch = Scratch::new();
+        let backup = scratch.path("before.json");
+        let output = run(
+            &scratch,
+            &no_reports(0x0951),
+            &[
+                "macro",
+                "set",
+                "0",
+                "--host-layout",
+                "fr",
+                "text:2^3",
+                "--backup",
+                backup.to_str().unwrap(),
+            ],
+        );
+        assert_eq!(
+            stderr(&output),
+            "openkeychron: '^' needs a dead key on a French AZERTY host, so what it types \
+             depends on the next key; type it with tap/down/up actions instead\n"
+        );
+        assert!(!backup.exists());
+    }
+
+    #[test]
+    fn macro_set_refuses_french_text_while_an_earlier_key_is_held_before_opening_a_session() {
+        let scratch = Scratch::new();
+        let backup = scratch.path("before.json");
+        let output = run(
+            &scratch,
+            &no_reports(0x0951),
+            &[
+                "macro",
+                "set",
+                "0",
+                "--host-layout",
+                "fr",
+                "down:0xe1",
+                "text:1a",
+                "up:0xe1",
+                "--backup",
+                backup.to_str().unwrap(),
+            ],
+        );
+        assert_eq!(
+            stderr(&output),
+            "openkeychron: text:\"1a\" comes while down:0xe1 is still held, which changes what \
+             it types; release it with up:0xe1 before the text\n"
+        );
+        assert!(!backup.exists());
+    }
+
+    #[test]
+    fn macro_list_with_french_host_layout_shows_keystrokes_as_the_text_they_type() {
+        let scratch = Scratch::new();
+        let output = run(
+            &scratch,
+            &final_capture("cli-macro-set-fr.toml"),
+            &["macro", "list", "--host-layout", "fr"],
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+        let text = stdout(&output);
+        assert!(text.contains("M0  text:\"Aé1@\"\n"), "{text}");
+        assert!(text.contains("M2  us-text:\"hi\" tap:0x28\n"), "{text}");
+    }
+
+    #[test]
+    fn macro_list_without_host_layout_shows_french_keystrokes_as_raw_actions() {
+        let scratch = Scratch::new();
+        let output = run(
+            &scratch,
+            &final_capture("cli-macro-set-fr.toml"),
+            &["macro", "list"],
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+        let text = stdout(&output);
+        assert!(
+            text.contains(
+                "M0  down:0xe1 tap:0x14 up:0xe1 tap:0x1f down:0xe1 tap:0x1e up:0xe1 down:0xe6 \
+                 tap:0x27 up:0xe6\n"
+            ),
+            "{text}"
+        );
+        assert!(text.contains("M2  text:\"hi\" tap:0x28\n"), "{text}");
+    }
+
+    #[test]
+    fn macro_list_json_with_french_host_layout_names_the_layout_and_host_text() {
+        let scratch = Scratch::new();
+        let output = run(
+            &scratch,
+            &final_capture("cli-macro-set-fr.toml"),
+            &["macro", "list", "--host-layout", "fr", "--json"],
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+        let json: Value = serde_json::from_str(&stdout(&output)).unwrap();
+        assert_eq!(json["host_layout"], "fr");
+        assert_eq!(json["macros"][0]["actions"], json!([{"host_text": "Aé1@"}]));
+        assert_eq!(
+            json["macros"][2]["actions"],
+            json!([{"text": "hi"}, {"tap": 40}])
         );
     }
 }

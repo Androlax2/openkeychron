@@ -65,6 +65,21 @@ pub enum MacroError {
     #[error("macro text can only hold ASCII characters 0x02–0x7f, got {character:?}")]
     InvalidText { character: char },
 
+    #[error(
+        "{character:?} needs a dead key on a {layout} host, so what it types depends on the \
+         next key; type it with tap/down/up actions instead"
+    )]
+    DeadKeyText {
+        character: char,
+        layout: &'static str,
+    },
+
+    #[error("{layout} has no key that types {character:?}; use tap/down/up actions instead")]
+    UntypableText {
+        character: char,
+        layout: &'static str,
+    },
+
     #[error("macro slot {slot} contains a 0 byte, which would end it early")]
     ZeroInSlot { slot: usize },
 
