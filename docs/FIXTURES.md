@@ -80,4 +80,6 @@ error immediately rather than waiting, and still checks that every event was con
 ## Layout
 
 - `fixtures/synthetic/`: hand-written fixtures that test the replay machinery itself.
+  Hand-written VIA definitions for the layout loader live there too, as
+  `via-definition-*.json` (`docs/protocol/via-definitions.md`).
 - `fixtures/<model>/`: real recordings, for example `fixtures/v5-max/detect.toml`.

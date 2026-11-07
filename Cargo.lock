@@ -258,6 +258,8 @@ name = "openkeychron-via"
 version = "0.0.0"
 dependencies = [
  "openkeychron-hid",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 

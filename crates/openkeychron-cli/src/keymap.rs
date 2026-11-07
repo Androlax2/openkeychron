@@ -1,22 +1,26 @@
 //! Keymap commands. Physical French legends name positions, not live assignments.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
-use openkeychron_via::{V5_MAX_FR_ISO, Via};
+use openkeychron_via::{DeviceRegistry, Via, ViaDefinition};
 use serde::Serialize;
 
-use crate::guarded_write::is_v5_max_iso_cable;
 use crate::session::{Session, SessionError};
 use crate::{DeviceOutput, device_output};
 
 #[derive(Debug, Subcommand)]
 pub enum KeymapAction {
-    /// Print each layer as a French-position grid with raw keycodes. Only reads.
+    /// Print each layer as a matrix grid with raw keycodes: French legends on the built-in
+    /// V5 Max ISO, positions for a layout read with --layout. Only reads.
     Show {
         /// Show only this zero-based layer (all layers are still read).
         #[arg(long)]
         layer: Option<u8>,
+        /// Read the physical layout from this VIA definition file, for a keyboard other
+        /// than the built-in V5 Max ISO. Keychron publishes one per model.
+        #[arg(long, value_name = "VIA_JSON")]
+        layout: Option<PathBuf>,
     },
     /// Set one raw keycode after saving a complete matrix/encoder backup. Writes over USB cable only.
     Set(crate::keymap_edit::SetArgs),
@@ -46,7 +50,9 @@ struct LayerOutput {
 struct KeyOutput {
     row: u8,
     column: u8,
-    legend: Option<&'static str>,
+    legend: Option<String>,
+    /// False for matrix slots no physical key uses.
+    is_physical: bool,
     keycode: u16,
 }
 
@@ -68,8 +74,9 @@ pub fn run(
         ));
     }
     match action {
-        KeymapAction::Show { layer } => {
-            let output = query(Session::start(fixture, record, device)?, *layer)?;
+        KeymapAction::Show { layer, layout } => {
+            let definition = layout.as_deref().map(load_definition).transpose()?;
+            let output = query(Session::start(fixture, record, device)?, *layer, definition)?;
             if json {
                 return crate::print_json(&output);
             }
@@ -82,17 +89,60 @@ pub fn run(
     }
 }
 
-fn query(session: Session, selected_layer: Option<u8>) -> Result<KeymapOutput, SessionError> {
+fn load_definition(path: &Path) -> Result<ViaDefinition, SessionError> {
+    let text = std::fs::read_to_string(path).map_err(|error| {
+        SessionError::Usage(format!(
+            "cannot read layout file {}: {error}",
+            path.display()
+        ))
+    })?;
+    ViaDefinition::from_json(&text)
+        .map_err(|error| SessionError::Usage(format!("layout file {}: {error}", path.display())))
+}
+
+fn query(
+    session: Session,
+    selected_layer: Option<u8>,
+    definition: Option<ViaDefinition>,
+) -> Result<KeymapOutput, SessionError> {
     let device = session.device().clone();
     let mut via = Via::new(session);
     let result = (|| {
-        if !is_v5_max_iso_cable(&device) {
-            return Err(SessionError::Usage(format!(
-                "keymap show requires the V5 Max ISO keyboard (3434:0951) on a USB cable; \
-                 got {:04x}:{:04x}",
-                device.vendor_id, device.product_id
-            )));
+        if device.is_receiver {
+            return Err(SessionError::Usage(
+                "keymap show needs the keyboard on a USB cable: a receiver does not identify \
+                 the keyboard behind it"
+                    .to_owned(),
+            ));
         }
+        let mut registry = DeviceRegistry::built_in();
+        if let Some(definition) = definition {
+            if (definition.vendor_id, definition.product_id)
+                != (device.vendor_id, device.product_id)
+            {
+                return Err(SessionError::Usage(format!(
+                    "the layout file is for {} ({:04x}:{:04x}), but the keyboard is \
+                     {:04x}:{:04x}",
+                    definition.name,
+                    definition.vendor_id,
+                    definition.product_id,
+                    device.vendor_id,
+                    device.product_id
+                )));
+            }
+            registry.register(definition).map_err(|error| {
+                SessionError::Usage(format!("{error}; run keymap show without --layout"))
+            })?;
+        }
+        let layout = registry
+            .layout(device.vendor_id, device.product_id)
+            .ok_or_else(|| {
+                SessionError::Usage(format!(
+                    "keymap show has no layout for {:04x}:{:04x}; pass --layout with this \
+                     keyboard's VIA definition file (built in: V5 Max ISO, 3434:0951)",
+                    device.vendor_id, device.product_id
+                ))
+            })?;
         let layer_count = via
             .layer_count()
             .map_err(|error| SessionError::via(&error, device.is_receiver))?;
@@ -104,9 +154,8 @@ fn query(session: Session, selected_layer: Option<u8>) -> Result<KeymapOutput, S
                 layer_count - 1
             )));
         }
-        let layout = V5_MAX_FR_ISO;
-        let columns = usize::from(layout.columns);
-        let layer_size = usize::from(layout.rows) * columns;
+        let columns = usize::from(layout.columns());
+        let layer_size = usize::from(layout.rows()) * columns;
         let keycodes = via
             .keymap(usize::from(layer_count) * layer_size)
             .map_err(|error| SessionError::via(&error, device.is_receiver))?;
@@ -116,15 +165,16 @@ fn query(session: Session, selected_layer: Option<u8>) -> Result<KeymapOutput, S
                 continue;
             }
             let mut keys = Vec::with_capacity(layer_size);
-            for row in 0..layout.rows {
-                for column in 0..layout.columns {
+            for row in 0..layout.rows() {
+                for column in 0..layout.columns() {
                     let offset = usize::from(index) * layer_size
                         + usize::from(row) * columns
                         + usize::from(column);
                     keys.push(KeyOutput {
                         row,
                         column,
-                        legend: layout.key(row, column).map(|key| key.legends.base),
+                        legend: layout.legend(row, column).map(str::to_owned),
+                        is_physical: layout.has_key(row, column),
                         keycode: u16::from(keycodes[offset]),
                     });
                 }
@@ -134,8 +184,8 @@ fn query(session: Session, selected_layer: Option<u8>) -> Result<KeymapOutput, S
         Ok(KeymapOutput {
             device: device_output(&device),
             layer_count,
-            rows: layout.rows,
-            columns: layout.columns,
+            rows: layout.rows(),
+            columns: layout.columns(),
             layers,
         })
     })();
@@ -160,7 +210,16 @@ fn print_grid(output: &KeymapOutput) {
         .max()
         .unwrap_or(0)
         + 1;
-    println!("Physical FR legends = raw hexadecimal keycodes; grid uses matrix rows/columns.");
+    let has_legends = output
+        .layers
+        .iter()
+        .flat_map(|layer| &layer.keys)
+        .any(|key| key.legend.is_some());
+    if has_legends {
+        println!("Physical FR legends = raw hexadecimal keycodes; grid uses matrix rows/columns.");
+    } else {
+        println!("(row,column) = raw hexadecimal keycodes; the layout file has no legends.");
+    }
     for (index, cells) in layers {
         println!("Layer {index}");
         for (row, cells) in cells.chunks(usize::from(output.columns)).enumerate() {
@@ -174,9 +233,9 @@ fn print_grid(output: &KeymapOutput) {
 }
 
 fn cell_text(key: &KeyOutput) -> String {
-    match key.legend {
+    match &key.legend {
         Some(legend) => format!("{legend}=0x{:04x}", key.keycode),
-        None if key.keycode != 0 => {
+        None if key.is_physical || key.keycode != 0 => {
             format!("({},{})=0x{:04x}", key.row, key.column, key.keycode)
         }
         None => String::new(),

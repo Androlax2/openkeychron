@@ -153,8 +153,8 @@ mod tests {
     #[test]
     fn keymap_show_refuses_unknown_layouts_and_receivers_before_sending_reports() {
         for (vendor_id, product_id, expected) in [
-            (0x3434, 0x0950, "V5 Max ISO"),
-            (0x3434, 0xd030, "V5 Max ISO"),
+            (0x3434, 0x0950, "no layout for 3434:0950; pass --layout"),
+            (0x3434, 0xd030, "USB cable"),
             (0x1234, 0x0951, "Keychron VIA interface"),
         ] {
             let mut fixture = fixture();
