@@ -5,6 +5,8 @@ mod tests {
     use std::path::PathBuf;
     use std::process::{Command, Output};
 
+    type BackupChange = fn(&mut serde_json::Value);
+
     fn fixture(name: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../fixtures/synthetic")
@@ -84,7 +86,7 @@ mod tests {
     }
 
     #[test]
-    fn rgb_mixed_region_saves_the_whole_mixed_state_before_writing() {
+    fn rgb_mixed_region_saves_the_whole_mixed_state_to_the_backup() {
         let path = fixture("cli-rgb-mixed-region.toml");
         let backup = new_backup_path("region");
         let output = openkeychron(&[
@@ -402,5 +404,142 @@ mod tests {
             stderr(&output)
         );
         assert!(!backup.exists());
+    }
+
+    fn region_a_and_left_shift(fixture_name: &str, test: &str) -> Output {
+        let path = fixture(fixture_name);
+        let backup = new_backup_path(test);
+        let output = openkeychron(&[
+            "rgb",
+            "mixed",
+            "region",
+            "--backup",
+            backup.to_str().unwrap(),
+            "--fixture",
+            path.to_str().unwrap(),
+            "1",
+            "A",
+            "4,0",
+        ]);
+        std::fs::remove_file(&backup).ok();
+        output
+    }
+
+    #[test]
+    fn rgb_mixed_region_sets_the_previous_state_again_when_the_save_fails() {
+        let output = region_a_and_left_shift("cli-rgb-mixed-save-fails.toml", "save-fails");
+        assert_failed_at_the_end_of_the_fixture(&output);
+        assert!(
+            stderr(&output).contains(
+                "the keyboard refused 0xa8 0x02 (status byte 1); the previous mixed RGB state \
+                 is set again and nothing was saved"
+            ),
+            "{}",
+            stderr(&output)
+        );
+    }
+
+    #[test]
+    fn rgb_mixed_region_says_when_setting_the_previous_state_again_also_fails() {
+        let output = region_a_and_left_shift("cli-rgb-mixed-rollback-fails.toml", "rollback-fails");
+        assert_failed_at_the_end_of_the_fixture(&output);
+        assert!(
+            stderr(&output).contains(
+                "setting the previous mixed RGB state again also failed (wrote regions of LEDs"
+            ),
+            "{}",
+            stderr(&output)
+        );
+    }
+
+    #[test]
+    fn rgb_mixed_effect_sets_the_previous_state_again_when_the_keyboard_refuses_the_effect() {
+        let path = fixture("cli-rgb-mixed-effect-refused.toml");
+        let backup = new_backup_path("effect-refused");
+        let output = openkeychron(&[
+            "rgb",
+            "mixed",
+            "effect",
+            "--backup",
+            backup.to_str().unwrap(),
+            "--fixture",
+            path.to_str().unwrap(),
+            "1",
+            "1",
+            "200",
+            "85",
+            "200",
+            "64",
+            "3000",
+        ]);
+        std::fs::remove_file(&backup).ok();
+        assert_failed_at_the_end_of_the_fixture(&output);
+        assert!(
+            stderr(&output).contains(
+                "the keyboard refused 0xa8 0x0f (status byte 1); the previous mixed RGB state \
+                 is set again and nothing was saved"
+            ),
+            "{}",
+            stderr(&output)
+        );
+    }
+
+    /// The fixture backup with `change` applied, written to a new file.
+    fn changed_backup(test: &str, change: BackupChange) -> PathBuf {
+        let mut source: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(fixture("mixed-rgb-backup.json")).unwrap(),
+        )
+        .unwrap();
+        change(&mut source);
+        let path = new_backup_path(test);
+        std::fs::write(&path, source.to_string()).unwrap();
+        path
+    }
+
+    #[test]
+    fn rgb_mixed_restore_refuses_a_backup_laid_out_for_another_keyboard() {
+        let cases: [(&str, BackupChange, &str); 2] = [
+            (
+                "three-regions",
+                |backup| {
+                    let list = backup["effects"][0].clone();
+                    backup["effects"].as_array_mut().unwrap().push(list);
+                },
+                "holds 3 regions; this keyboard has 2",
+            ),
+            (
+                "six-slots",
+                |backup| {
+                    backup["effects_per_region"] = 6.into();
+                    for list in backup["effects"].as_array_mut().unwrap() {
+                        let empty = list[4].clone();
+                        list.as_array_mut().unwrap().push(empty);
+                    }
+                },
+                "holds 6 effect slots per region; this keyboard has 5",
+            ),
+        ];
+        for (test, change, expected) in cases {
+            let source = changed_backup(test, change);
+            let backup = new_backup_path(&format!("{test}-pre-restore"));
+            let output = openkeychron(&[
+                "rgb",
+                "mixed",
+                "restore",
+                "--backup",
+                backup.to_str().unwrap(),
+                "--fixture",
+                fixture("cli-rgb-mixed-open.toml").to_str().unwrap(),
+                source.to_str().unwrap(),
+            ]);
+            std::fs::remove_file(&source).ok();
+            assert_failed_at_the_end_of_the_fixture(&output);
+            assert!(
+                stderr(&output).contains(expected),
+                "{test}: {}",
+                stderr(&output)
+            );
+            assert!(!backup.exists(), "{test}");
+        }
     }
 }

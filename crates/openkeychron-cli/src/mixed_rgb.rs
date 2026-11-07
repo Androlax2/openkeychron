@@ -597,27 +597,26 @@ fn leds_under(
         .collect()
 }
 
-/// Sets `wanted`, then saves it. If any request fails, `previous` is set again in full and
-/// nothing is saved: left in RAM, a partial change would reach EEPROM with the next Keychron RGB
-/// save, from this tool or any other.
+/// Sets `wanted`, then saves it. If any request fails, the save included, `previous` is set
+/// again in full and nothing is saved: left in RAM, a partial or unsaved change would reach
+/// EEPROM with the next Keychron RGB save, from this tool or any other.
 fn apply(
     rgb: &mut MixedRgb<'_, Session>,
     wanted: &MixedBackup,
     previous: &MixedBackup,
 ) -> Result<(), SessionError> {
-    if let Err(error) = set_state(rgb, wanted) {
-        return Err(match set_state(rgb, previous) {
-            Ok(()) => SessionError::Keychron(format!(
-                "{error}; the previous mixed RGB state is set again and nothing was saved"
-            )),
-            Err(restore) => SessionError::Keychron(format!(
-                "{error}; setting the previous mixed RGB state again also failed ({restore}); \
-                 nothing was saved, and unplugging the keyboard drops the change"
-            )),
-        });
-    }
-    rgb.save()?;
-    Ok(())
+    let Err(error) = set_state(rgb, wanted).and_then(|()| rgb.save()) else {
+        return Ok(());
+    };
+    Err(match set_state(rgb, previous) {
+        Ok(()) => SessionError::Keychron(format!(
+            "{error}; the previous mixed RGB state is set again and nothing was saved"
+        )),
+        Err(restore) => SessionError::Keychron(format!(
+            "{error}; setting the previous mixed RGB state again also failed ({restore}); \
+             nothing was saved, and unplugging the keyboard drops the change"
+        )),
+    })
 }
 
 fn set_state(rgb: &mut MixedRgb<'_, Session>, state: &MixedBackup) -> Result<(), KeychronError> {
@@ -640,4 +639,78 @@ fn print_saved(backup: &Path, what: &str) {
         backup.display(),
         backup.display()
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use super::{EffectSlot, MixedBackup};
+
+    type BackupChange = fn(&mut MixedBackup);
+
+    fn fixture_backup() -> MixedBackup {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/synthetic/mixed-rgb-backup.json");
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    fn refusal(change: impl FnOnce(&mut MixedBackup)) -> String {
+        let mut backup = fixture_backup();
+        change(&mut backup);
+        backup
+            .validate(Path::new("backup.json"))
+            .unwrap_err()
+            .to_string()
+    }
+
+    #[test]
+    fn accepts_the_fixture_backup() {
+        fixture_backup().validate(Path::new("backup.json")).unwrap();
+    }
+
+    #[test]
+    fn refuses_inconsistent_backups_before_opening_a_device() {
+        let cases: [(BackupChange, &str); 6] = [
+            (
+                |backup| backup.format_version = 2,
+                "format version 2 is not 1",
+            ),
+            (
+                |backup| backup.device.product_id = 0x0952,
+                "device 3434:0952 is not a model verified for writes",
+            ),
+            (|backup| backup.led_count = 97, "has 98 regions for 97 LEDs"),
+            (
+                |backup| backup.effects.clear(),
+                "has 0 effect lists; expected 1 to 255",
+            ),
+            (
+                |backup| {
+                    backup.effects[1].pop();
+                },
+                "has an effect list of 4 slots; expected 5",
+            ),
+            (
+                |backup| backup.regions[0] = 2,
+                "puts an LED in region 2, past its 2 regions",
+            ),
+        ];
+        for (change, expected) in cases {
+            let message = refusal(change);
+            assert!(message.contains(expected), "{message}");
+        }
+    }
+
+    #[test]
+    fn describes_an_empty_slot_as_empty() {
+        let empty = EffectSlot {
+            effect: 0,
+            hue: 10,
+            saturation: 20,
+            speed: 30,
+            duration_ms: 40,
+        };
+        assert_eq!(super::describe(empty), "empty");
+    }
 }

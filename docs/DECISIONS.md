@@ -253,8 +253,8 @@ Decided by Theo on 2026-11-07, from three proposed designs. Mixed RGB gets four 
 Every write asks the built-in registry first (cable, write-verified model), then captures the
 whole mixed state (every LED's region and every region's effect list) through a read-only
 wrapper and saves it to a new file that is read back before anything is sent
-(`rgb_guarded_write::write_mixed`). It then sets the whole state with read-back, sets the
-previous state again if any request fails, and saves (`A8 02`) only when everything matches.
+(`rgb_guarded_write::write_mixed`). It then sets the whole state with read-back and saves it
+(`A8 02`); if any request fails, the save included, it sets the previous state again.
 `restore` saves its own pre-restore backup and refuses a backup for another model or another
 LED, region or slot count. Like the keymap and macro writes, these refuse `--record`, so a
 recording cannot overwrite a backup.
