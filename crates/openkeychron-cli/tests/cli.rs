@@ -309,7 +309,10 @@ mod tests {
         ]);
         assert!(!output.status.success());
         assert!(
-            stderr(&output).contains("only written over a USB cable"),
+            stderr(&output).contains(
+                "require the V5 Max ISO (3434:0951) on a USB cable; receiver and \
+                 unverified-model writes are refused (got receiver 3434:d030)"
+            ),
             "{}",
             stderr(&output)
         );
@@ -369,7 +372,7 @@ mod tests {
         assert_eq!(saved["brightness"], 254);
         // 255 is the value that makes the keyboard store 254 again.
         assert!(
-            stdout(&output).contains("brightness 255"),
+            stdout(&output).contains("openkeychron rgb set --backup <NEW_FILE> brightness 255"),
             "{}",
             stdout(&output)
         );
@@ -394,10 +397,81 @@ mod tests {
         ]);
         assert!(!output.status.success());
         assert!(
-            stderr(&output).contains("only written over a USB cable"),
+            stderr(&output).contains(
+                "require the V5 Max ISO (3434:0951) on a USB cable; receiver and \
+                 unverified-model writes are refused (got receiver 3434:d030)"
+            ),
             "{}",
             stderr(&output)
         );
         assert!(!backup.exists());
+    }
+
+    #[test]
+    fn rgb_set_sends_no_write_when_the_backup_cannot_be_saved() {
+        // The fixture holds only the reads before the backup, so any write would fail the replay.
+        let path = fixture("cli-rgb-get.toml");
+        let backup = std::env::temp_dir()
+            .join(format!("openkeychron-rgb-missing-{}", std::process::id()))
+            .join("backup.json");
+        let output = openkeychron(&[
+            "rgb",
+            "set",
+            "--backup",
+            backup.to_str().unwrap(),
+            "--fixture",
+            path.to_str().unwrap(),
+            "brightness",
+            "128",
+        ]);
+        let stderr = stderr(&output);
+        assert!(!output.status.success());
+        assert!(
+            stderr.contains(&format!(
+                "cannot save new RGB backup {}: ",
+                backup.display()
+            )),
+            "{stderr}"
+        );
+        assert!(
+            stderr
+                .trim_end()
+                .ends_with("; no write was sent to the keyboard"),
+            "{stderr}"
+        );
+    }
+
+    #[test]
+    fn rgb_set_refuses_an_existing_backup_and_keeps_its_content() {
+        // The fixture holds only the reads before the backup, so any write would fail the replay.
+        let path = fixture("cli-rgb-get.toml");
+        let backup = std::env::temp_dir().join(format!(
+            "openkeychron-rgb-existing-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(&backup, "keep this existing backup").unwrap();
+        let output = openkeychron(&[
+            "rgb",
+            "set",
+            "--backup",
+            backup.to_str().unwrap(),
+            "--fixture",
+            path.to_str().unwrap(),
+            "brightness",
+            "128",
+        ]);
+        let kept = std::fs::read_to_string(&backup);
+        std::fs::remove_file(&backup).ok();
+        assert!(!output.status.success());
+        assert!(
+            stderr(&output).contains(&format!(
+                "cannot save new RGB backup {}: ",
+                backup.display()
+            )),
+            "{}",
+            stderr(&output)
+        );
+        assert_eq!(kept.unwrap(), "keep this existing backup");
+        assert_eq!(stdout(&output), "");
     }
 }

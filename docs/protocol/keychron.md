@@ -125,6 +125,27 @@ Sub-commands from the enum in `common/rgb/keychron_rgb.c`. The V5 Max has
 | `0x0E` | Get effect list | `[2]` = region, `[3]` = start, `[4]` = count (≤ 3) | 8 bytes per effect: effect, H, S, speed, time (LE u32) | — |
 | `0x0F` | Set effect list | `[2]` = region, `[3]` = start, `[4]` = count (≤ 3), then 8 bytes per effect | status | RAM until `0x02` |
 
+### Per-key RGB
+
+From `common/rgb/keychron_rgb.c`, `common/rgb/per_key_rgb.c` and `common/rgb/rgb_matrix_kb.inc`.
+Implemented in `crates/openkeychron-keychron/src/perkey.rs` (#29); `openkeychron rgb key` uses it.
+
+- **Support check.** `0xA8` is compiled only with `KEYCHRON_RGB_ENABLE`, which also sets feature
+  bit 7 of `0xA2`. openkeychron checks that bit, then `A8 01` = `0x0001`, before sending anything
+  else, and reports "per-key RGB (Keychron firmware 1.1.0 or later)" as unsupported otherwise.
+  A firmware that does not answer `0xA2` at all is reported the same way.
+- **Colours are HSV.** `per_key_led[]` holds H, S, V per LED, but every per-key effect (solid,
+  breathing, three reactive) replaces V with the global RGB brightness. `rgb key` keeps the
+  stored V and changes only H and S.
+- **They show only in the per-key effect.** `PER_KEY_RGB` is a custom RGB matrix effect; its
+  VIA effect number depends on which effects the build enables, so it is not hard-coded.
+- **One save for everything.** `A8 02` writes indicators, per-key type and colours, mixed regions
+  and effects together, including changes another program left unsaved in RAM.
+- **LED lookup.** `A8 06` maps a matrix position to the *first* LED under it
+  (`rgb_matrix_map_row_column_to_led`), or `0xFF`. It fills reply bytes only for the
+  firmware's own `MATRIX_COLS`: the other bytes keep the request's content, so a column outside
+  the matrix would read as LED 0. openkeychron refuses positions outside the layout's matrix.
+
 The plain RGB effect, brightness, speed and colour are **not** Keychron commands: they are VIA's
 lighting values (`id_custom_get_value` / `id_custom_set_value` on channel
 `id_qmk_rgb_matrix_channel`, `quantum/via.h` at the repository root). #28 implements them in

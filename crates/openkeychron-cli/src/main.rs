@@ -1,6 +1,14 @@
 //! openkeychron command-line tool.
 
+mod backup_file;
+mod guarded_write;
+mod keymap;
+mod keymap_backup;
+mod keymap_edit;
+mod macro_backup;
+mod macros;
 mod rgb;
+mod rgb_guarded_write;
 mod session;
 mod settings;
 
@@ -24,7 +32,8 @@ struct Cli {
     #[arg(long, global = true, value_name = "FILE", conflicts_with = "record")]
     fixture: Option<PathBuf>,
 
-    /// Record the session with the device to FILE (a fixture, see docs/FIXTURES.md).
+    /// Record the session to FILE; unsupported for keymap set/restore/reset and macro set/restore
+    /// (see docs/FIXTURES.md).
     #[arg(long, global = true, value_name = "FILE")]
     record: Option<PathBuf>,
 
@@ -50,12 +59,23 @@ enum Command {
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..=60_000))]
         reply_timeout_ms: Option<u64>,
     },
-    /// Read or change the RGB effect, speed, brightness and colour. Writes only over a USB cable.
+    /// Display or safely edit cable V5 Max ISO keymaps. Editing requires a new backup file.
+    Keymap {
+        #[command(subcommand)]
+        action: keymap::KeymapAction,
+    },
+    /// List or safely edit macros on a cable V5 Max ISO. Editing requires a new backup file.
+    Macro {
+        #[command(subcommand)]
+        action: macros::MacroCommand,
+    },
+    /// Read or change the RGB effect, speed, brightness, colour and per-key colours. Writes only
+    /// to a cable V5 Max ISO.
     Rgb {
         #[command(subcommand)]
         action: rgb::RgbAction,
     },
-    /// Read or change debounce and Snap Click. Writes only over a USB cable.
+    /// Read or change debounce and Snap Click. Writes only to a cable V5 Max ISO.
     Settings {
         #[command(subcommand)]
         action: settings::SettingsAction,
@@ -100,6 +120,20 @@ fn run(cli: &Cli) -> Result<(), SessionError> {
     match &cli.command {
         Command::List => list(cli),
         Command::Info { reply_timeout_ms } => info(cli, *reply_timeout_ms),
+        Command::Keymap { action } => keymap::run(
+            action,
+            cli.fixture.as_deref(),
+            cli.record.as_deref(),
+            cli.device.as_deref(),
+            cli.json,
+        ),
+        Command::Macro { action } => macros::run(
+            action,
+            cli.fixture.as_deref(),
+            cli.record.as_deref(),
+            cli.device.as_deref(),
+            cli.json,
+        ),
         Command::Rgb { action } => rgb::run(
             action,
             cli.fixture.as_deref(),
@@ -255,4 +289,92 @@ pub(crate) fn print_json(value: &impl Serialize) -> Result<(), SessionError> {
         .map_err(|error| SessionError::Usage(format!("cannot encode JSON: {error}")))?;
     println!("{text}");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::{Parser, error::ErrorKind};
+
+    use super::Cli;
+
+    #[test]
+    fn keymap_mutations_reject_recording_before_any_session_can_be_opened() {
+        for arguments in [
+            vec![
+                "openkeychron",
+                "keymap",
+                "set",
+                "0",
+                "2,1",
+                "4",
+                "--backup",
+                "before.json",
+            ],
+            vec![
+                "openkeychron",
+                "keymap",
+                "restore",
+                "source.json",
+                "--backup",
+                "before.json",
+            ],
+            vec!["openkeychron", "keymap", "reset", "--backup", "before.json"],
+        ] {
+            for destination in ["before.json", "source.json", "elsewhere.toml"] {
+                let mut arguments = arguments.clone();
+                arguments.extend(["--record", destination]);
+                // Parsing only: RED must never execute a valid mutation on real hardware.
+                let error = Cli::try_parse_from(arguments).unwrap_err();
+                assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
+            }
+        }
+    }
+
+    #[test]
+    fn keymap_dispatch_refuses_recording_even_when_parser_validation_is_bypassed() {
+        for arguments in [
+            vec![
+                "openkeychron",
+                "keymap",
+                "set",
+                "0",
+                "2,1",
+                "4",
+                "--backup",
+                "before.json",
+            ],
+            vec![
+                "openkeychron",
+                "keymap",
+                "restore",
+                "source.json",
+                "--backup",
+                "before.json",
+            ],
+            vec!["openkeychron", "keymap", "reset", "--backup", "before.json"],
+        ] {
+            let mut arguments = arguments;
+            arguments.extend(["--fixture", "fixture-that-must-not-be-opened.toml"]);
+            let mut cli = Cli::try_parse_from(arguments).unwrap();
+            cli.record = Some("recording-that-must-not-be-created.toml".into());
+            let error = super::run(&cli).unwrap_err();
+            assert!(
+                error.to_string().contains("--record is not supported"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn keymap_show_retains_its_existing_record_argument_without_executing_it() {
+        let cli = Cli::try_parse_from([
+            "openkeychron",
+            "keymap",
+            "show",
+            "--record",
+            "not-executed.toml",
+        ])
+        .unwrap();
+        assert_eq!(cli.record, Some("not-executed.toml".into()));
+    }
 }
