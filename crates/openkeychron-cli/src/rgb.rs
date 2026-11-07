@@ -100,7 +100,8 @@ pub fn run(
             via.into_transport().finish()
         }
         RgbAction::Set { backup, value } => {
-            let session = cable_session(Session::start(fixture, record, device)?)?;
+            let session = Session::start(fixture, record, device)?;
+            guarded_write::require_write_verified("RGB writes", session.device())?;
             let mut via = Via::new(session);
             set(&mut via, backup, value, via_error(false))?;
             via.into_transport().finish()

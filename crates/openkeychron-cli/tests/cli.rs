@@ -309,7 +309,10 @@ mod tests {
         ]);
         assert!(!output.status.success());
         assert!(
-            stderr(&output).contains("only written over a USB cable"),
+            stderr(&output).contains(
+                "require the V5 Max ISO (3434:0951) on a USB cable; receiver and \
+                 unverified-model writes are refused (got receiver 3434:d030)"
+            ),
             "{}",
             stderr(&output)
         );
@@ -394,7 +397,10 @@ mod tests {
         ]);
         assert!(!output.status.success());
         assert!(
-            stderr(&output).contains("only written over a USB cable"),
+            stderr(&output).contains(
+                "require the V5 Max ISO (3434:0951) on a USB cable; receiver and \
+                 unverified-model writes are refused (got receiver 3434:d030)"
+            ),
             "{}",
             stderr(&output)
         );

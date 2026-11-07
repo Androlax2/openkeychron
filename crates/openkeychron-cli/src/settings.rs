@@ -9,6 +9,7 @@ use openkeychron_keychron::{
 };
 use serde::Serialize;
 
+use crate::guarded_write;
 use crate::session::{Session, SessionError};
 
 #[derive(Debug, Subcommand)]
@@ -124,12 +125,8 @@ pub fn run(
     json: bool,
 ) -> Result<(), SessionError> {
     let session = Session::start(fixture, record, device)?;
-    if matches!(action, SettingsAction::Set { .. }) && session.device().is_receiver {
-        return Err(SessionError::Usage(
-            "settings are only written over a USB cable: writes through a receiver are not \
-             verified yet (see docs/protocol/keychron-link.md)"
-                .to_owned(),
-        ));
+    if matches!(action, SettingsAction::Set { .. }) {
+        guarded_write::require_write_verified("settings writes", session.device())?;
     }
     let mut keychron = Keychron::new(session);
     let result = match action {

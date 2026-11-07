@@ -241,3 +241,4 @@ that model were verified on hardware (`WriteAccess`). Only the built-in V5 Max I
 `VerifiedOverCable`; a definition registered from a file is always `ReadOnly`. Keymap and
 macro writes, `rgb key` and backup validation ask only the built-in registry, and no write
 command takes `--layout`, so a layout file never enables a write. Receivers stay refused.
+Since #100, `rgb set` and `settings set` ask it too.
