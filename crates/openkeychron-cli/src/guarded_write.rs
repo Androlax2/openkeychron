@@ -97,6 +97,7 @@ struct SuccessOutput<'a> {
     backup: &'a Path,
 }
 
+/// Prints `summary` with the backup and its undo command, or `operation` and the backup as JSON.
 pub(crate) fn print_success(
     kind: &WriteKind,
     operation: &'static str,
