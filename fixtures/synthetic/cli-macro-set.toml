@@ -1,5 +1,5 @@
 # Hand-written synthetic session. NOT hardware traffic: a 4-slot, 40-byte macro buffer.
-# Capture, then `macro set 1 text:hi tap:0x2c delay:50`: size check, flag 0xFF, body, flag 0, each read back,
+# Capture, then `macro set 1 --host-layout us text:hi tap:0x2c delay:50`: size check, flag 0xFF, body, flag 0, each read back,
 # then a full capture to verify.
 format_version = 1
 
