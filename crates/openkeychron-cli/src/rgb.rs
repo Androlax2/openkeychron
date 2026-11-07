@@ -1,10 +1,12 @@
 //! `openkeychron rgb`: RGB matrix effect, speed, brightness and colour, through VIA's lighting
-//! channel (`crates/openkeychron-via/src/rgb.rs` has the firmware behaviour).
+//! channel (`crates/openkeychron-via/src/rgb.rs` has the firmware behaviour), and per-key colours
+//! through Keychron's RGB commands (`crates/openkeychron-keychron/src/perkey.rs`).
 
 use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
-use openkeychron_via::{RgbMatrix, RgbValue, Via, brightness_to_store};
+use openkeychron_keychron::{Keychron, KeychronError, MatrixSize, PerKeyColor};
+use openkeychron_via::{RgbMatrix, RgbValue, V5_MAX_FR_ISO, Via, brightness_to_store};
 use serde::Serialize;
 
 use crate::session::{Session, SessionError};
@@ -23,6 +25,22 @@ pub enum RgbAction {
         #[command(subcommand)]
         value: Value,
     },
+    /// Set one key's colour (per-key RGB, Keychron firmware 1.1.0 or later). Saves the previous
+    /// colour to --backup first, reads the new one back, and stores it only if it matches.
+    /// Shown only while the lighting effect is Keychron's per-key effect.
+    Key {
+        /// Where to save the previous colour before writing (JSON).
+        #[arg(long, value_name = "FILE")]
+        backup: PathBuf,
+
+        /// A French legend as `openkeychron keymap show` prints it (`A`, `Esc`, `Num 7`), or a
+        /// matrix position as ROW,COLUMN (`4,0` for the left Shift).
+        key: String,
+        /// 0–255.
+        hue: u8,
+        /// 0–255.
+        saturation: u8,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -35,6 +53,25 @@ pub enum Value {
     Speed { value: u8 },
     /// Hue and saturation, 0–255 each.
     Color { hue: u8, saturation: u8 },
+}
+
+/// A key of the V5 Max ISO layout, found by legend or matrix position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct KeyPosition {
+    legend: &'static str,
+    row: u8,
+    column: u8,
+}
+
+#[derive(Debug, Serialize)]
+struct KeyBackup {
+    key: &'static str,
+    row: u8,
+    column: u8,
+    led: u8,
+    hue: u8,
+    saturation: u8,
+    value: u8,
 }
 
 #[derive(Debug, Serialize)]
@@ -53,22 +90,48 @@ pub fn run(
     device: Option<&Path>,
     json: bool,
 ) -> Result<(), SessionError> {
-    let session = Session::start(fixture, record, device)?;
-    if matches!(action, RgbAction::Set { .. }) && session.device().is_receiver {
+    match action {
+        RgbAction::Get => {
+            let session = Session::start(fixture, record, device)?;
+            let through_receiver = session.device().is_receiver;
+            let mut via = Via::new(session);
+            get(&mut via, json, via_error(through_receiver))?;
+            via.into_transport().finish()
+        }
+        RgbAction::Set { backup, value } => {
+            let session = cable_session(Session::start(fixture, record, device)?)?;
+            let mut via = Via::new(session);
+            set(&mut via, backup, value, via_error(false))?;
+            via.into_transport().finish()
+        }
+        RgbAction::Key {
+            backup,
+            key,
+            hue,
+            saturation,
+        } => {
+            // Resolved before opening the device, so a mistyped key never reaches the keyboard.
+            let key = resolve_key(key)?;
+            let session = cable_session(Session::start(fixture, record, device)?)?;
+            set_key(session, backup, key, *hue, *saturation)
+        }
+    }
+}
+
+fn via_error(through_receiver: bool) -> impl Fn(openkeychron_via::ViaError) -> SessionError {
+    move |error| SessionError::via(&error, through_receiver)
+}
+
+/// Refuses a receiver session for commands that write.
+fn cable_session(session: Session) -> Result<Session, SessionError> {
+    if session.device().is_receiver {
         return Err(SessionError::Usage(
             "lighting is only written over a USB cable: writes through a receiver are not \
              verified yet (see docs/protocol/keychron-link.md)"
                 .to_owned(),
         ));
     }
-    let through_receiver = session.device().is_receiver;
-    let mut via = Via::new(session);
-    let via_error = |error: openkeychron_via::ViaError| SessionError::via(&error, through_receiver);
-    match action {
-        RgbAction::Get => get(&mut via, json, via_error)?,
-        RgbAction::Set { backup, value } => set(&mut via, backup, value, via_error)?,
-    }
-    via.into_transport().finish()
+    Ok(session)
 }
 
 fn get(
@@ -122,6 +185,150 @@ fn set(
     Ok(())
 }
 
+fn set_key(
+    session: Session,
+    backup: &Path,
+    key: KeyPosition,
+    hue: u8,
+    saturation: u8,
+) -> Result<(), SessionError> {
+    let device = session.device();
+    // Legends and matrix positions are only known for this keyboard.
+    if device.vendor_id != 0x3434 || device.product_id != 0x0951 {
+        return Err(SessionError::Usage(format!(
+            "rgb key requires the V5 Max ISO keyboard (3434:0951); got {:04x}:{:04x}",
+            device.vendor_id, device.product_id
+        )));
+    }
+    let mut keychron = Keychron::new(session);
+    let result = write_key_color(&mut keychron, backup, key, hue, saturation);
+    keychron.into_transport().complete(result)
+}
+
+fn write_key_color(
+    keychron: &mut Keychron<Session>,
+    backup: &Path,
+    key: KeyPosition,
+    hue: u8,
+    saturation: u8,
+) -> Result<(), SessionError> {
+    let mut rgb = keychron.per_key_rgb()?;
+    let matrix = MatrixSize {
+        rows: V5_MAX_FR_ISO.rows,
+        columns: V5_MAX_FR_ISO.columns,
+    };
+    let led = rgb.led_index(matrix, key.row, key.column)?.ok_or_else(|| {
+        SessionError::Usage(format!(
+            "key `{}` ({},{}) has no LED",
+            key.legend, key.row, key.column
+        ))
+    })?;
+    let previous = rgb.color(led)?;
+    write_json(
+        backup,
+        &KeyBackup {
+            key: key.legend,
+            row: key.row,
+            column: key.column,
+            led,
+            hue: previous.hue,
+            saturation: previous.saturation,
+            value: previous.value,
+        },
+    )?;
+    // Every per-key effect ignores the stored value, so keeping it changes nothing visible.
+    let wanted = PerKeyColor {
+        hue,
+        saturation,
+        value: previous.value,
+    };
+    match rgb.set_color(led, wanted) {
+        Ok(()) => {}
+        // Left in RAM, the wrong colour would reach EEPROM with the next Keychron RGB save, from
+        // this tool or any other.
+        Err(error @ KeychronError::ReadBackMismatch { .. }) => {
+            return Err(match rgb.set_color(led, previous) {
+                Ok(()) => SessionError::Keychron(format!(
+                    "{error}; the previous colour is set again and nothing was saved"
+                )),
+                Err(restore) => SessionError::Keychron(format!(
+                    "{error}; setting the previous colour again also failed ({restore}); \
+                     nothing was saved, and unplugging the keyboard drops the change"
+                )),
+            });
+        }
+        Err(other) => return Err(other.into()),
+    }
+    rgb.save()?;
+
+    println!(
+        "Key `{}` ({},{}, LED {led}) set to hue {hue}, saturation {saturation}; it reads back \
+         the same and is saved.",
+        key.legend, key.row, key.column
+    );
+    println!(
+        "It shows while the lighting effect is Keychron's per-key effect, whose number depends \
+         on the firmware build."
+    );
+    println!(
+        "Previous colour saved to {}. Restore with:\n  openkeychron rgb key --backup <FILE> \
+         {},{} {} {}",
+        backup.display(),
+        key.row,
+        key.column,
+        previous.hue,
+        previous.saturation
+    );
+    Ok(())
+}
+
+/// Finds a key by ROW,COLUMN or by its French legend, ignoring case.
+fn resolve_key(name: &str) -> Result<KeyPosition, SessionError> {
+    let layout = V5_MAX_FR_ISO;
+    if let Some((row, column)) = name.split_once(',')
+        && let (Ok(row), Ok(column)) = (row.trim().parse::<u8>(), column.trim().parse::<u8>())
+    {
+        return layout
+            .key(row, column)
+            .map(|key| KeyPosition {
+                legend: key.legends.base,
+                row,
+                column,
+            })
+            .ok_or_else(|| {
+                SessionError::Usage(format!(
+                    "the V5 Max ISO has no key at matrix position {row},{column}"
+                ))
+            });
+    }
+    let wanted = name.to_lowercase();
+    let matches: Vec<KeyPosition> = layout
+        .keys
+        .iter()
+        .filter(|key| key.legends.base.to_lowercase() == wanted)
+        .map(|key| KeyPosition {
+            legend: key.legends.base,
+            row: key.matrix[0],
+            column: key.matrix[1],
+        })
+        .collect();
+    match matches.as_slice() {
+        [key] => Ok(*key),
+        [] => Err(SessionError::Usage(format!(
+            "no V5 Max ISO key has the legend `{name}`; use a legend from `openkeychron keymap \
+             show` or ROW,COLUMN"
+        ))),
+        several => Err(SessionError::Usage(format!(
+            "`{name}` names several keys ({}); give ROW,COLUMN",
+            several
+                .iter()
+                .map(|key| format!("{},{}", key.row, key.column))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
 fn restore_command(previous: &RgbOutput, value: &Value) -> String {
     let prefix = "openkeychron rgb set --backup <FILE>";
     match value {
@@ -139,6 +346,10 @@ fn restore_command(previous: &RgbOutput, value: &Value) -> String {
 }
 
 fn write_backup(path: &Path, previous: &RgbOutput) -> Result<(), SessionError> {
+    write_json(path, previous)
+}
+
+fn write_json(path: &Path, previous: &impl Serialize) -> Result<(), SessionError> {
     let text = serde_json::to_string_pretty(previous)
         .map_err(|error| SessionError::Usage(format!("cannot encode the backup: {error}")))?;
     std::fs::write(path, text + "\n").map_err(|error| {
@@ -156,5 +367,63 @@ fn output(rgb: RgbMatrix) -> RgbOutput {
         speed: rgb.speed,
         hue: rgb.hue,
         saturation: rgb.saturation,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{KeyPosition, resolve_key};
+
+    #[test]
+    fn perkey_finds_a_key_by_its_legend_ignoring_case() {
+        assert_eq!(
+            resolve_key("num 7").ok(),
+            Some(KeyPosition {
+                legend: "Num 7",
+                row: 2,
+                column: 15,
+            })
+        );
+    }
+
+    #[test]
+    fn perkey_finds_a_key_by_matrix_position() {
+        assert_eq!(
+            resolve_key("4,12").ok(),
+            Some(KeyPosition {
+                legend: "Shift",
+                row: 4,
+                column: 12,
+            })
+        );
+    }
+
+    #[test]
+    fn perkey_reads_a_lone_comma_as_the_comma_key() {
+        assert_eq!(
+            resolve_key(",").ok(),
+            Some(KeyPosition {
+                legend: ",",
+                row: 4,
+                column: 8,
+            })
+        );
+    }
+
+    #[test]
+    fn perkey_rejects_a_matrix_position_without_a_key() {
+        assert_eq!(
+            resolve_key("0,1").err().map(|error| error.to_string()),
+            Some("the V5 Max ISO has no key at matrix position 0,1".to_owned())
+        );
+    }
+
+    #[test]
+    fn perkey_rejects_an_unknown_legend() {
+        assert!(
+            resolve_key("Menu")
+                .err()
+                .is_some_and(|error| error.to_string().contains("no V5 Max ISO key has"))
+        );
     }
 }
