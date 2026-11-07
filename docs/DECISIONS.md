@@ -268,3 +268,12 @@ Rejected:
   editing a 98-entry file by hand.
 
 `get` names keys from the built-in V5 Max ISO table, so it needs that keyboard on a cable too.
+
+Added on 2026-11-07 with #112: effect numbers depend on the firmware build, so mixed RGB
+backups are format version 2 and record the Keychron firmware version and build date
+(`0xA1`, as `info` reads it). Every write reads them in its read-only capture step and refuses
+to write when the keyboard does not report them. `restore` refuses a backup from another build
+unless `--allow-other-firmware` is given. A format version 1 backup records no build, so it is
+treated like one from another build: it still loads, and restores only with that flag. Refusing
+version 1 outright was rejected, because it would leave a backup taken before the update
+restorable only by editing its JSON by hand.

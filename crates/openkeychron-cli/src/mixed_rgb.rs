@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
 use openkeychron_hid::KeychronDevice;
-use openkeychron_keychron::{Keychron, KeychronError, MatrixSize, MixedEffect, MixedRgb};
+use openkeychron_keychron::{
+    FirmwareVersion, Keychron, KeychronError, MatrixSize, MixedEffect, MixedRgb,
+};
 use openkeychron_via::V5_MAX_FR_ISO;
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +19,9 @@ use crate::rgb_guarded_write::{self, MixedReader};
 use crate::session::{Session, SessionError};
 use crate::{backup_file, guarded_write};
 
-const BACKUP_VERSION: u32 = 1;
+const BACKUP_VERSION: u32 = 2;
+/// Backups from before #112, which do not record the firmware build.
+const PRE_FIRMWARE_BACKUP_VERSION: u32 = 1;
 const WRITES: &str = "mixed RGB writes";
 const SHOWN_WHEN: &str = "Mixed RGB shows while the lighting effect is Keychron's mixed RGB \
                           effect, whose number depends on the firmware build.";
@@ -68,6 +72,12 @@ pub enum MixedAction {
         #[arg(long, value_name = "FILE", conflicts_with = "record")]
         backup: PathBuf,
 
+        /// Restore even if the backup was taken on another firmware build, or does not record one
+        /// (format version 1). Effect numbers depend on the build, so the effects can differ. A
+        /// keyboard that does not report its build is still refused.
+        #[arg(long)]
+        allow_other_firmware: bool,
+
         /// Mixed RGB backup to restore.
         from: PathBuf,
     },
@@ -108,12 +118,38 @@ impl From<EffectSlot> for MixedEffect {
     }
 }
 
+/// The Keychron firmware build (`0xA1`) whose effect numbers a backup's effect lists use.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct FirmwareBuild {
+    version: String,
+    build_date: String,
+}
+
+impl From<FirmwareVersion> for FirmwareBuild {
+    fn from(firmware: FirmwareVersion) -> Self {
+        Self {
+            version: firmware.version,
+            build_date: firmware.build_date,
+        }
+    }
+}
+
+impl std::fmt::Display for FirmwareBuild {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{} built {}", self.version, self.build_date)
+    }
+}
+
 /// The whole mixed RGB state: every LED's region and every region's effect list.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct MixedBackup {
     format_version: u32,
     device: BackupDevice,
+    /// `None` only in a format version 1 backup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    firmware: Option<FirmwareBuild>,
     led_count: u8,
     effects_per_region: u8,
     /// One region number per LED.
@@ -129,11 +165,23 @@ impl MixedBackup {
         let invalid = |reason: String| {
             SessionError::Usage(format!("mixed RGB backup {}: {reason}", path.display()))
         };
-        if self.format_version != BACKUP_VERSION {
-            return Err(invalid(format!(
-                "format version {} is not {BACKUP_VERSION}",
-                self.format_version
-            )));
+        match (self.format_version, &self.firmware) {
+            (BACKUP_VERSION, Some(_)) | (PRE_FIRMWARE_BACKUP_VERSION, None) => {}
+            (BACKUP_VERSION, None) => {
+                return Err(invalid(format!(
+                    "format version {BACKUP_VERSION} has no firmware build"
+                )));
+            }
+            (PRE_FIRMWARE_BACKUP_VERSION, Some(_)) => {
+                return Err(invalid(format!(
+                    "format version {PRE_FIRMWARE_BACKUP_VERSION} cannot hold a firmware build"
+                )));
+            }
+            (other, _) => {
+                return Err(invalid(format!(
+                    "format version {other} is not {PRE_FIRMWARE_BACKUP_VERSION} or {BACKUP_VERSION}"
+                )));
+            }
         }
         self.device.write_verified_model().map_err(invalid)?;
         if self.regions.len() != usize::from(self.led_count) {
@@ -207,6 +255,33 @@ impl MixedBackup {
             )));
         }
         Ok(())
+    }
+
+    /// Checks the backup was taken on the firmware build the keyboard runs, unless
+    /// `allow_other_firmware`: the same effect number can be another effect on another build.
+    fn require_firmware(
+        &self,
+        path: &Path,
+        running: &FirmwareBuild,
+        allow_other_firmware: bool,
+    ) -> Result<(), SessionError> {
+        if allow_other_firmware || self.firmware.as_ref() == Some(running) {
+            return Ok(());
+        }
+        let taken_on = match &self.firmware {
+            Some(build) => format!("was taken on Keychron firmware {build}"),
+            None => format!(
+                "does not record the firmware build its effect numbers belong to (format \
+                 version {})",
+                self.format_version
+            ),
+        };
+        Err(SessionError::Usage(format!(
+            "mixed RGB backup {} {taken_on}; this keyboard runs {running}. Effect numbers depend \
+             on the build, so the restored regions could play other effects; nothing was \
+             written; pass --allow-other-firmware to restore it anyway",
+            path.display()
+        )))
     }
 }
 
@@ -288,12 +363,16 @@ pub fn run(
             };
             set_effect(session, backup, *region, *slot, wanted)
         }
-        MixedAction::Restore { backup, from } => {
+        MixedAction::Restore {
+            backup,
+            allow_other_firmware,
+            from,
+        } => {
             let restored: MixedBackup = backup_file::load(from, "mixed RGB")?;
             restored.validate(from)?;
             let session = Session::start(fixture, record, device)?;
             guarded_write::require_write_verified(WRITES, session.device())?;
-            restore(session, backup, from, restored)
+            restore(session, backup, from, restored, *allow_other_firmware)
         }
     }
 }
@@ -422,7 +501,8 @@ fn set_region(
             if region >= reader.region_count() {
                 return Err(missing_region(region, reader.region_count()));
             }
-            let previous = capture(reader, device)?;
+            let firmware = read_firmware(reader)?;
+            let previous = capture(reader, device, firmware)?;
             let mut wanted = previous.clone();
             for led in leds_under(reader, keys)? {
                 wanted.regions[usize::from(led)] = region;
@@ -464,7 +544,8 @@ fn set_effect(
                     reader.effects_per_region()
                 )));
             }
-            let previous = capture(reader, device)?;
+            let firmware = read_firmware(reader)?;
+            let previous = capture(reader, device, firmware)?;
             let mut wanted = previous.clone();
             wanted.effects[usize::from(region)][usize::from(slot)] = effect;
             Ok((previous, wanted))
@@ -494,6 +575,7 @@ fn restore(
     backup: &Path,
     from: &Path,
     restored: MixedBackup,
+    allow_other_firmware: bool,
 ) -> Result<(), SessionError> {
     let device = backup_device(session.device());
     if restored.device != device {
@@ -511,7 +593,9 @@ fn restore(
         backup,
         |reader| {
             restored.require_layout_of(from, reader)?;
-            Ok((capture(reader, device)?, restored))
+            let firmware = read_firmware(reader)?;
+            restored.require_firmware(from, &firmware, allow_other_firmware)?;
+            Ok((capture(reader, device, firmware)?, restored))
         },
         |rgb, previous, restored| {
             apply(rgb, &restored, &previous)?;
@@ -519,6 +603,17 @@ fn restore(
                 "Mixed RGB state from {} restored; it reads back as written and is saved.",
                 from.display()
             );
+            match &restored.firmware {
+                Some(build) if restored.firmware != previous.firmware => println!(
+                    "It was restored although it was taken on another firmware build ({build}): \
+                     check each region's effects with `openkeychron rgb mixed get`."
+                ),
+                None => println!(
+                    "It was restored although it does not record the firmware build it was taken \
+                     on: check each region's effects with `openkeychron rgb mixed get`."
+                ),
+                Some(_) => {}
+            }
             print_saved(backup, "Mixed RGB state before the restore");
             Ok(())
         },
@@ -545,10 +640,26 @@ const fn v5_max_matrix() -> MatrixSize {
     }
 }
 
-/// Every LED's region and every region's effect list.
+/// The firmware build a backup records. A write is refused when the keyboard does not report it,
+/// because its backup could not say which effects its effect numbers mean.
+fn read_firmware(reader: &mut MixedReader<'_, '_>) -> Result<FirmwareBuild, SessionError> {
+    reader
+        .firmware_version()?
+        .map(FirmwareBuild::from)
+        .map_err(|reason| {
+            SessionError::Usage(format!(
+                "mixed RGB writes record the Keychron firmware build in their backup, and this \
+                 keyboard does not report it ({}); nothing was written",
+                crate::not_reported(reason)
+            ))
+        })
+}
+
+/// Every LED's region and every region's effect list, taken on `firmware`.
 fn capture(
     reader: &mut MixedReader<'_, '_>,
     device: BackupDevice,
+    firmware: FirmwareBuild,
 ) -> Result<MixedBackup, SessionError> {
     let regions = reader.regions()?;
     let mut effects = Vec::with_capacity(usize::from(reader.region_count()));
@@ -564,6 +675,7 @@ fn capture(
     Ok(MixedBackup {
         format_version: BACKUP_VERSION,
         device,
+        firmware: Some(firmware),
         led_count: reader.led_count(),
         effects_per_region: reader.effects_per_region(),
         regions,
@@ -671,10 +783,18 @@ mod tests {
 
     #[test]
     fn refuses_inconsistent_backups_before_opening_a_device() {
-        let cases: [(BackupChange, &str); 6] = [
+        let cases: [(BackupChange, &str); 8] = [
             (
-                |backup| backup.format_version = 2,
-                "format version 2 is not 1",
+                |backup| backup.format_version = 3,
+                "format version 3 is not 1 or 2",
+            ),
+            (
+                |backup| backup.firmware = None,
+                "format version 2 has no firmware build",
+            ),
+            (
+                |backup| backup.format_version = 1,
+                "format version 1 cannot hold a firmware build",
             ),
             (
                 |backup| backup.device.product_id = 0x0952,
@@ -700,6 +820,14 @@ mod tests {
             let message = refusal(change);
             assert!(message.contains(expected), "{message}");
         }
+    }
+
+    #[test]
+    fn accepts_a_format_1_backup_without_a_firmware_build() {
+        let mut backup = fixture_backup();
+        backup.format_version = 1;
+        backup.firmware = None;
+        backup.validate(Path::new("backup.json")).unwrap();
     }
 
     #[test]

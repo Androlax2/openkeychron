@@ -1,9 +1,10 @@
 # Hand-written, not recorded: `openkeychron rgb mixed effect --backup FILE 1 1 4 85 200 64 3000`
-# on a V5 Max over cable: the checks and layout (0xa2, a8 01, a8 05, a8 0b), the whole mixed
-# state (a8 0c, a8 0e), then the whole state with region 1's slot 1 set to effect 4, hue 85,
-# saturation 200, speed 64, 3000 ms, each request read back (a8 0d/0c, a8 0f/0e), and the save
-# (a8 02).
-# Bytes follow keyboards/keychron/common/rgb/keychron_rgb.c at Keychron/qmk_firmware 2b493ff9.
+# on a V5 Max over cable: the checks and layout (0xa2, a8 01, a8 05, a8 0b), the firmware build
+# (0xa0, 0xa1 "v1.1.0 2025-03-17-10:00:00"), the whole mixed state (a8 0c, a8 0e), then the whole
+# state with region 1's slot 1 set to effect 4, hue 85, saturation 200, speed 64, 3000 ms, each
+# request read back (a8 0d/0c, a8 0f/0e), and the save (a8 02).
+# Bytes follow keyboards/keychron/common/rgb/keychron_rgb.c and keychron_raw_hid.c at
+# Keychron/qmk_firmware 2b493ff9.
 # LED numbers and the region map are made up: every key but the knob gets the next LED in the
 # built-in layout's order, and the top row starts in region 1. Effect lists are the firmware
 # defaults. Real recordings need the cable session (#20).
@@ -47,6 +48,22 @@ data = "a8 0b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
 [[event]]
 kind = "read"
 data = "a8 0b 00 02 05 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "a0 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a0 02 00 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "a1 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a1 76 31 2e 31 2e 30 20 32 30 32 35 2d 30 33 2d 31 37 2d 31 30 3a 30 30 3a 30 30 00 00 00 00 00"
 
 [[event]]
 kind = "write"

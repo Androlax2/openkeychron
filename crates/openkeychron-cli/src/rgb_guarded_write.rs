@@ -9,7 +9,8 @@
 use std::path::Path;
 
 use openkeychron_keychron::{
-    Keychron, KeychronError, MatrixSize, MixedEffect, MixedRgb, PerKeyColor, PerKeyRgb,
+    FirmwareVersion, Keychron, KeychronError, MatrixSize, MixedEffect, MixedRgb, NotReported,
+    PerKeyColor, PerKeyRgb,
 };
 use openkeychron_via::{RgbMatrix, Via, ViaError};
 use serde::Serialize;
@@ -96,6 +97,12 @@ impl MixedReader<'_, '_> {
 
     pub(crate) fn effects_per_region(&self) -> u8 {
         self.0.effects_per_region()
+    }
+
+    pub(crate) fn firmware_version(
+        &mut self,
+    ) -> Result<Result<FirmwareVersion, NotReported>, KeychronError> {
+        self.0.firmware_version()
     }
 
     pub(crate) fn regions(&mut self) -> Result<Vec<u8>, KeychronError> {
