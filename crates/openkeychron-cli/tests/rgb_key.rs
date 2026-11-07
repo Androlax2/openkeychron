@@ -72,7 +72,7 @@ mod tests {
         std::fs::remove_file(&backup).ok();
         assert!(output.status.success(), "{}", stderr(&output));
         assert!(
-            stdout(&output).contains("openkeychron rgb key --backup <FILE> 2,1 170 255"),
+            stdout(&output).contains("openkeychron rgb key --backup <NEW_FILE> 2,1 170 255"),
             "{}",
             stdout(&output)
         );
@@ -162,14 +162,37 @@ mod tests {
         assert!(!output.status.success());
         assert!(
             stderr.contains(&format!(
-                "cannot write the backup to {}: ",
+                "cannot save new per-key RGB backup {}: ",
                 backup.display()
             )),
             "{stderr}"
         );
         assert!(
-            stderr.trim_end().ends_with("; nothing was changed"),
+            stderr
+                .trim_end()
+                .ends_with("; no write was sent to the keyboard"),
             "{stderr}"
         );
+    }
+
+    #[test]
+    fn perkey_refuses_an_existing_backup_and_keeps_its_content() {
+        // The fixture ends with the reads before the backup, so any write would fail the replay.
+        let backup = backup_path("existing");
+        std::fs::write(&backup, "keep this existing backup").unwrap();
+        let output = rgb_key("cli-rgb-key-before-backup.toml", &backup, "A");
+        let kept = std::fs::read_to_string(&backup);
+        std::fs::remove_file(&backup).ok();
+        assert!(!output.status.success());
+        assert!(
+            stderr(&output).contains(&format!(
+                "cannot save new per-key RGB backup {}: ",
+                backup.display()
+            )),
+            "{}",
+            stderr(&output)
+        );
+        assert_eq!(kept.unwrap(), "keep this existing backup");
+        assert_eq!(stdout(&output), "");
     }
 }

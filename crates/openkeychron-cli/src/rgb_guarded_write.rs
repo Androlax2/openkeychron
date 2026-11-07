@@ -1,7 +1,9 @@
 //! The order `rgb set` and `rgb key` keep, by type: the capture step gets only a read-only
 //! wrapper, the previous values are saved to the backup file, and only then does the write step
 //! get the client with `set_rgb_value`, `set_color` and `save`. Unlike [`crate::guarded_write`],
-//! the backup is plain JSON and every message is `rgb`'s own.
+//! the backup is plain JSON and every message but the shared backup refusal is `rgb`'s own. The
+//! backup goes to a new file, so following the printed restore command with the same `--backup`
+//! cannot replace the previous values it holds.
 
 use std::path::Path;
 
@@ -9,6 +11,7 @@ use openkeychron_keychron::{Keychron, KeychronError, MatrixSize, PerKeyColor, Pe
 use openkeychron_via::{RgbMatrix, Via, ViaError};
 use serde::Serialize;
 
+use crate::backup_file;
 use crate::session::{Session, SessionError};
 
 /// The VIA lighting read `rgb set` needs before its backup, and no write.
@@ -49,7 +52,7 @@ pub(crate) fn write_lighting<Previous: Serialize>(
 ) -> Result<(), SessionError> {
     let mut via = Via::new(session);
     let previous = capture(&mut LightingReader(&mut via))?;
-    write_json(backup, &previous)?;
+    backup_file::save_new(backup, "RGB", &previous)?;
     write(&mut via, previous)?;
     via.into_transport().finish()
 }
@@ -69,19 +72,8 @@ pub(crate) fn write_per_key<Previous: Serialize>(
         .map_err(SessionError::from)
         .and_then(|mut rgb| {
             let previous = capture(&mut PerKeyReader(&mut rgb))?;
-            write_json(backup, &previous)?;
+            backup_file::save_new(backup, "per-key RGB", &previous)?;
             write(&mut rgb, previous)
         });
     keychron.into_transport().complete(result)
-}
-
-fn write_json(path: &Path, previous: &impl Serialize) -> Result<(), SessionError> {
-    let text = serde_json::to_string_pretty(previous)
-        .map_err(|error| SessionError::Usage(format!("cannot encode the backup: {error}")))?;
-    std::fs::write(path, text + "\n").map_err(|error| {
-        SessionError::Usage(format!(
-            "cannot write the backup to {}: {error}; nothing was changed",
-            path.display()
-        ))
-    })
 }

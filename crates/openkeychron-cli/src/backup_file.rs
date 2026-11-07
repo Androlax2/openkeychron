@@ -1,4 +1,4 @@
-//! Backup files written before any keymap or macro write.
+//! Backup files written before any keymap, macro or RGB write.
 
 use std::fs::File;
 use std::io::{Read, Write};
