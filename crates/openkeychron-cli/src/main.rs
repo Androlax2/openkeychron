@@ -7,6 +7,7 @@ mod keymap_backup;
 mod keymap_edit;
 mod macro_backup;
 mod macros;
+mod mixed_rgb;
 mod rgb;
 mod rgb_guarded_write;
 mod session;
@@ -32,8 +33,8 @@ struct Cli {
     #[arg(long, global = true, value_name = "FILE", conflicts_with = "record")]
     fixture: Option<PathBuf>,
 
-    /// Record the session to FILE; unsupported for keymap set/restore/reset and macro set/restore
-    /// (see docs/FIXTURES.md).
+    /// Record the session to FILE; unsupported for keymap set/restore/reset, macro set/restore
+    /// and rgb mixed region/effect/restore (see docs/FIXTURES.md).
     #[arg(long, global = true, value_name = "FILE")]
     record: Option<PathBuf>,
 
@@ -354,6 +355,71 @@ mod tests {
             vec!["openkeychron", "keymap", "reset", "--backup", "before.json"],
         ] {
             let mut arguments = arguments;
+            arguments.extend(["--fixture", "fixture-that-must-not-be-opened.toml"]);
+            let mut cli = Cli::try_parse_from(arguments).unwrap();
+            cli.record = Some("recording-that-must-not-be-created.toml".into());
+            let error = super::run(&cli).unwrap_err();
+            assert!(
+                error.to_string().contains("--record is not supported"),
+                "{error}"
+            );
+        }
+    }
+
+    fn rgb_mixed_writes() -> [Vec<&'static str>; 3] {
+        [
+            vec![
+                "openkeychron",
+                "rgb",
+                "mixed",
+                "region",
+                "--backup",
+                "before.json",
+                "1",
+                "A",
+            ],
+            vec![
+                "openkeychron",
+                "rgb",
+                "mixed",
+                "effect",
+                "--backup",
+                "before.json",
+                "0",
+                "0",
+                "4",
+                "0",
+                "255",
+                "127",
+                "5000",
+            ],
+            vec![
+                "openkeychron",
+                "rgb",
+                "mixed",
+                "restore",
+                "--backup",
+                "before.json",
+                "source.json",
+            ],
+        ]
+    }
+
+    #[test]
+    fn rgb_mixed_writes_reject_recording_before_any_session_can_be_opened() {
+        for arguments in rgb_mixed_writes() {
+            for destination in ["before.json", "source.json", "elsewhere.toml"] {
+                let mut arguments = arguments.clone();
+                arguments.extend(["--record", destination]);
+                let error = Cli::try_parse_from(arguments).unwrap_err();
+                assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
+            }
+        }
+    }
+
+    #[test]
+    fn rgb_mixed_dispatch_refuses_recording_even_when_parser_validation_is_bypassed() {
+        for mut arguments in rgb_mixed_writes() {
             arguments.extend(["--fixture", "fixture-that-must-not-be-opened.toml"]);
             let mut cli = Cli::try_parse_from(arguments).unwrap();
             cli.record = Some("recording-that-must-not-be-created.toml".into());

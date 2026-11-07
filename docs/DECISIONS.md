@@ -242,3 +242,29 @@ that model were verified on hardware (`WriteAccess`). Only the built-in V5 Max I
 macro writes, `rgb key` and backup validation ask only the built-in registry, and no write
 command takes `--layout`, so a layout file never enables a write. Receivers stay refused.
 Since #100, `rgb set` and `settings set` ask it too.
+
+## 2026-11: `rgb mixed` edits regions and effects, and restores whole-state backups (#83)
+
+Decided by Theo on 2026-11-07, from three proposed designs. Mixed RGB gets four commands:
+`rgb mixed get [--json]`, `rgb mixed region --backup FILE REGION KEY...`,
+`rgb mixed effect --backup FILE REGION SLOT EFFECT HUE SAT SPEED DURATION_MS` and
+`rgb mixed restore --backup NEW_FILE FROM_FILE`.
+
+Every write asks the built-in registry first (cable, write-verified model), then captures the
+whole mixed state (every LED's region and every region's effect list) through a read-only
+wrapper and saves it to a new file that is read back before anything is sent
+(`rgb_guarded_write::write_mixed`). It then sets the whole state with read-back, sets the
+previous state again if any request fails, and saves (`A8 02`) only when everything matches.
+`restore` saves its own pre-restore backup and refuses a backup for another model or another
+LED, region or slot count. Like the keymap and macro writes, these refuse `--record`, so a
+recording cannot overwrite a backup.
+
+Rejected:
+
+- Targeted edits without a `restore` command, printing undo commands like `rgb key`: undoing
+  a region change over many keys would take one command per region, and a lost terminal would
+  leave only the JSON backup to read by hand.
+- One declarative `apply FILE` command: one write path, but changing one key would mean
+  editing a 98-entry file by hand.
+
+`get` names keys from the built-in V5 Max ISO table, so it needs that keyboard on a cable too.

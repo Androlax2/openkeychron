@@ -149,7 +149,7 @@ Implemented in `crates/openkeychron-keychron/src/perkey.rs` (#29); `openkeychron
 ### Mixed RGB
 
 From `common/rgb/keychron_rgb.c`, `common/rgb/mixed_rgb.c` and `common/rgb/keychron_rgb_type.h`.
-Implemented in `crates/openkeychron-keychron/src/mixed.rs` (#83).
+Implemented in `crates/openkeychron-keychron/src/mixed.rs` (#83); `openkeychron rgb mixed` uses it.
 
 - **Regions and effect lists.** Every LED belongs to a region (`regions[]`, one byte per LED).
   Each region has its own list of `EFFECTS_PER_LAYER` slots and plays them in turn, so the

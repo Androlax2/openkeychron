@@ -1,6 +1,7 @@
 //! `openkeychron rgb`: RGB matrix effect, speed, brightness and colour, through VIA's lighting
 //! channel (`crates/openkeychron-via/src/rgb.rs` has the firmware behaviour), and per-key colours
-//! through Keychron's RGB commands (`crates/openkeychron-keychron/src/perkey.rs`).
+//! through Keychron's RGB commands (`crates/openkeychron-keychron/src/perkey.rs`). `rgb mixed`
+//! is in `mixed_rgb.rs`.
 
 use std::path::{Path, PathBuf};
 
@@ -9,6 +10,7 @@ use openkeychron_keychron::{KeychronError, MatrixSize, PerKeyColor, PerKeyRgb};
 use openkeychron_via::{RgbMatrix, RgbValue, V5_MAX_FR_ISO, Via, brightness_to_store};
 use serde::Serialize;
 
+use crate::mixed_rgb::{self, MixedAction};
 use crate::session::{Session, SessionError};
 use crate::{guarded_write, rgb_guarded_write};
 
@@ -42,6 +44,12 @@ pub enum RgbAction {
         /// 0–255.
         saturation: u8,
     },
+    /// Mixed RGB (Keychron firmware 1.1.0 or later): each key belongs to a region, and each
+    /// region plays its own list of effects.
+    Mixed {
+        #[command(subcommand)]
+        action: MixedAction,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -58,10 +66,10 @@ pub enum Value {
 
 /// A key of the V5 Max ISO layout, found by legend or matrix position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct KeyPosition {
-    legend: &'static str,
-    row: u8,
-    column: u8,
+pub(crate) struct KeyPosition {
+    pub(crate) legend: &'static str,
+    pub(crate) row: u8,
+    pub(crate) column: u8,
 }
 
 #[derive(Debug, Serialize)]
@@ -115,6 +123,7 @@ pub fn run(
             let session = Session::start(fixture, record, device)?;
             set_key(session, backup, key, *hue, *saturation)
         }
+        RgbAction::Mixed { action } => mixed_rgb::run(action, fixture, record, device, json),
     }
 }
 
@@ -282,7 +291,7 @@ fn write_key_color(
 }
 
 /// Finds a key by ROW,COLUMN or by its French legend, ignoring case.
-fn resolve_key(name: &str) -> Result<KeyPosition, SessionError> {
+pub(crate) fn resolve_key(name: &str) -> Result<KeyPosition, SessionError> {
     let layout = V5_MAX_FR_ISO;
     if let Some((row, column)) = name.split_once(',')
         && let (Ok(row), Ok(column)) = (row.trim().parse::<u8>(), column.trim().parse::<u8>())
