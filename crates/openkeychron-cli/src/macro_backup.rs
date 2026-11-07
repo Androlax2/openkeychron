@@ -5,6 +5,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::backup_file;
+use crate::guarded_write::PreChangeSnapshot;
 use crate::keymap_backup::BackupDevice;
 use crate::session::SessionError;
 
@@ -47,8 +48,10 @@ impl MacroBackup {
         backup.validate()?;
         Ok(backup)
     }
+}
 
-    pub fn save_new(&self, path: &Path) -> Result<(), SessionError> {
+impl PreChangeSnapshot for MacroBackup {
+    fn save_new(&self, path: &Path) -> Result<(), SessionError> {
         self.validate()?;
         backup_file::save_new_verified(path, "macro", self)
     }

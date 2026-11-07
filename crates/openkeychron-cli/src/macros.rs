@@ -10,7 +10,7 @@ use openkeychron_via::{
 };
 use serde::Serialize;
 
-use crate::guarded_write::{self, WriteKind};
+use crate::guarded_write::{self, ViaReader, WriteKind};
 use crate::keymap_backup::BackupDevice;
 use crate::macro_backup::{BACKUP_VERSION, MacroBackup};
 use crate::session::{Session, SessionError};
@@ -366,8 +366,8 @@ fn set(
         fixture,
         device,
         &args.backup,
-        |via, identity, backup| {
-            let previous = capture(via, identity, None)?;
+        |reader, identity| {
+            let previous = capture(reader, identity, None)?;
             if !previous.macros_enabled() {
                 return Err(SessionError::Usage(
                     "the macro buffer's last byte is not 0, so an earlier write did not finish \
@@ -392,7 +392,9 @@ fn set(
             macros[usize::from(args.slot)] = encoded;
             let buffer = buffer_from_slots(&macros, previous.buffer.len())
                 .map_err(|error| SessionError::Usage(error.to_string()))?;
-            backup.save(|path| previous.save_new(path))?;
+            Ok((previous, buffer))
+        },
+        |via, identity, previous, buffer| {
             via.write_macro_buffer(&buffer)
                 .map_err(|error| SessionError::via(&error, false))?;
             verify(via, identity, &MacroBackup { buffer, ..previous })
@@ -429,9 +431,8 @@ fn restore(
         fixture,
         device,
         &args.backup,
-        |via, identity, backup| {
-            let previous = capture(via, identity, Some(&wanted))?;
-            backup.save(|path| previous.save_new(path))?;
+        |reader, identity| Ok((capture(reader, identity, Some(&wanted))?, ())),
+        |via, identity, _previous, ()| {
             via.write_macro_buffer(&wanted.buffer)
                 .map_err(|error| SessionError::via(&error, false))?;
             verify(via, identity, &wanted)
@@ -449,7 +450,7 @@ fn restore(
 /// Reads the whole macro buffer. With `expected`, the keyboard must report the same macro
 /// count and buffer size, so a restore never writes a buffer laid out for other firmware.
 fn capture(
-    via: &mut Via<Session>,
+    via: &mut ViaReader<'_>,
     device: &KeychronDevice,
     expected: Option<&MacroBackup>,
 ) -> Result<MacroBackup, SessionError> {
@@ -483,7 +484,7 @@ fn verify(
     device: &KeychronDevice,
     expected: &MacroBackup,
 ) -> Result<(), SessionError> {
-    if capture(via, device, Some(expected))? != *expected {
+    if capture(&mut ViaReader::new(via), device, Some(expected))? != *expected {
         return Err(SessionError::Usage(
             "macro buffer verification did not match the expected state".to_owned(),
         ));

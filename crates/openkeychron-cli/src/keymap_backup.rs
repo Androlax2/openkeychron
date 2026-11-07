@@ -6,6 +6,7 @@ use openkeychron_via::V5_MAX_FR_ISO;
 use serde::{Deserialize, Serialize};
 
 use crate::backup_file;
+use crate::guarded_write::PreChangeSnapshot;
 use crate::session::SessionError;
 
 pub(crate) const BACKUP_VERSION: u32 = 1;
@@ -75,8 +76,10 @@ impl KeymapBackup {
         backup.validate()?;
         Ok(backup)
     }
+}
 
-    pub fn save_new(&self, path: &Path) -> Result<(), SessionError> {
+impl PreChangeSnapshot for KeymapBackup {
+    fn save_new(&self, path: &Path) -> Result<(), SessionError> {
         self.validate()?;
         backup_file::save_new_verified(path, "keymap", self)
     }
