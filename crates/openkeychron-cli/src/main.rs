@@ -466,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn rgb_and_settings_writes_reject_recording_before_any_session_can_be_opened() {
+    fn rgb_and_settings_writes_reject_recording_given_next_to_backup_at_parse_time() {
         for arguments in rgb_and_settings_writes() {
             for destination in ["before.json", "elsewhere.toml"] {
                 // Right after `--backup FILE`: clap only checks the conflict while it is still
