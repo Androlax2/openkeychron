@@ -98,5 +98,4 @@ unsupported. The CLI display above uses these existing read-only APIs without ad
 keymap writes or a decoded key-name catalogue.
 
 Backed-up editing is documented separately in [keymap write safety](via-keymap-write.md).
-The `show` command stays read-only; reset remains unavailable while its full installed-
-firmware footprint/defaults are unproven.
+The `show` command stays read-only.

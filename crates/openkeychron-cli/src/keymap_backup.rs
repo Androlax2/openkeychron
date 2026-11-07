@@ -1,12 +1,11 @@
 //! Strict keymap snapshots, not whole-device or whole-EEPROM backups.
 
-use std::fs::File;
-use std::io::{Read, Write};
 use std::path::Path;
 
 use openkeychron_via::V5_MAX_FR_ISO;
 use serde::{Deserialize, Serialize};
 
+use crate::backup_file;
 use crate::session::SessionError;
 
 pub(crate) const BACKUP_VERSION: u32 = 1;
@@ -72,46 +71,14 @@ impl KeymapBackup {
     }
 
     pub fn load(path: &Path) -> Result<Self, SessionError> {
-        const MAX_BACKUP_BYTES: usize = 1_048_576;
-        let file = File::open(path).map_err(|error| {
-            SessionError::Usage(format!(
-                "cannot read keymap backup {}: {error}",
-                path.display()
-            ))
-        })?;
-        let read_limit = u64::try_from(MAX_BACKUP_BYTES + 1)
-            .map_err(|error| invalid(format!("invalid backup size limit: {error}")))?;
-        let mut text = String::new();
-        file.take(read_limit)
-            .read_to_string(&mut text)
-            .map_err(|error| invalid(format!("cannot read {}: {error}", path.display())))?;
-        if text.len() > MAX_BACKUP_BYTES {
-            return Err(invalid("file exceeds 1 MiB"));
-        }
-        let backup: Self = serde_json::from_str(&text).map_err(invalid)?;
+        let backup: Self = backup_file::load(path, "keymap")?;
         backup.validate()?;
         Ok(backup)
     }
 
     pub fn save_new(&self, path: &Path) -> Result<(), SessionError> {
         self.validate()?;
-        let mut text = serde_json::to_string_pretty(self).map_err(invalid)?;
-        text.push('\n');
-        let failure = |error| {
-            SessionError::Usage(format!(
-                "cannot save new keymap backup {}: {error}; choose a new writable --backup path; \
-             no keymap write was attempted",
-                path.display()
-            ))
-        };
-        let mut file = File::options()
-            .write(true)
-            .create_new(true)
-            .open(path)
-            .map_err(failure)?;
-        file.write_all(text.as_bytes())
-            .and_then(|()| file.sync_all())
-            .map_err(failure)
+        backup_file::save_new_verified(path, "keymap", self)
     }
 }
 

@@ -250,4 +250,18 @@ mod tests {
         );
         assert_eq!(via.into_transport().finish(), Ok(()));
     }
+
+    #[test]
+    fn reset_keymap_before_write_sends_dynamic_keymap_reset_and_accepts_its_echo() {
+        let mut via = replay(exchange(&[6], &[6]));
+        assert_eq!(via.reset_keymap(), Ok(()));
+        assert_eq!(via.into_transport().finish(), Ok(()));
+    }
+
+    #[test]
+    fn reset_keymap_before_write_reports_firmware_without_the_command() {
+        let mut via = replay(exchange(&[6], &[0xff]));
+        assert_eq!(via.reset_keymap(), Err(ViaError::Unhandled { command: 6 }));
+        assert_eq!(via.into_transport().finish(), Ok(()));
+    }
 }

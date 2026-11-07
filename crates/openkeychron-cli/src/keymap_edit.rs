@@ -54,6 +54,13 @@ pub(crate) struct RestoreArgs {
     backup: PathBuf,
 }
 
+#[derive(Debug, Args)]
+pub(crate) struct ResetArgs {
+    /// New file for the complete pre-reset matrix and encoder keymap.
+    #[arg(long, value_name = "FILE", conflicts_with = "record")]
+    backup: PathBuf,
+}
+
 fn parse_keycode(value: &str) -> Result<u16, String> {
     let (digits, radix) = match value
         .strip_prefix("0x")
@@ -116,7 +123,12 @@ pub(crate) fn set(
     via.into_transport()
         .complete(result)
         .map_err(|error| edit_failure(error, has_backup, &args.backup))?;
-    print_success("set", &args.backup, json)
+    print_success(
+        "set",
+        "Keymap set verified against the complete matrix/encoder snapshot.",
+        &args.backup,
+        json,
+    )
 }
 
 pub(crate) fn restore(
@@ -159,7 +171,42 @@ pub(crate) fn restore(
     via.into_transport()
         .complete(result)
         .map_err(|error| edit_failure(error, has_backup, &args.backup))?;
-    print_success("restore", &args.backup, json)
+    print_success(
+        "restore",
+        "Keymap restore verified against the complete matrix/encoder snapshot.",
+        &args.backup,
+        json,
+    )
+}
+
+pub(crate) fn reset(
+    args: &ResetArgs,
+    fixture: Option<&Path>,
+    device: Option<&Path>,
+    json: bool,
+) -> Result<(), SessionError> {
+    let session = Session::start(fixture, None, device)?;
+    let identity = session.device().clone();
+    let mut via = Via::new(session);
+    let mut has_backup = false;
+    let result = (|| {
+        let previous = capture(&mut via, &identity, None)?;
+        // The defaults are unknown, so this verified backup is the only undo.
+        previous.save_new(&args.backup)?;
+        has_backup = true;
+        via.reset_keymap()
+            .map_err(|error| SessionError::via(&error, false))?;
+        capture(&mut via, &identity, Some(&previous)).map(|_| ())
+    })();
+    via.into_transport()
+        .complete(result)
+        .map_err(|error| edit_failure(error, has_backup, &args.backup))?;
+    print_success(
+        "reset",
+        "Keymap reset to the firmware's default matrix and encoder keys.",
+        &args.backup,
+        json,
+    )
 }
 
 fn capture(
@@ -251,16 +298,27 @@ fn edit_failure(error: SessionError, has_backup: bool, path: &Path) -> SessionEr
     }
     SessionError::Usage(format!(
         "{error}; keymap state may have changed, and complete restoration was not confirmed; \
-         pre-change matrix/encoder backup retained at {}",
+         pre-change matrix/encoder backup retained at {}; \
+         undo with `openkeychron keymap restore {} --backup <NEW_FILE>`",
+        path.display(),
         path.display()
     ))
 }
 
-fn print_success(operation: &'static str, backup: &Path, json: bool) -> Result<(), SessionError> {
+fn print_success(
+    operation: &'static str,
+    summary: &str,
+    backup: &Path,
+    json: bool,
+) -> Result<(), SessionError> {
     if json {
         return crate::print_json(&EditOutput { operation, backup });
     }
-    println!("Keymap {operation} verified against the complete matrix/encoder snapshot.");
+    println!("{summary}");
     println!("Pre-change backup: {}", backup.display());
+    println!(
+        "Undo with: openkeychron keymap restore {} --backup <NEW_FILE>",
+        backup.display()
+    );
     Ok(())
 }

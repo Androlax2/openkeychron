@@ -1,5 +1,6 @@
 //! openkeychron command-line tool.
 
+mod backup_file;
 mod keymap;
 mod keymap_backup;
 mod keymap_edit;
@@ -27,7 +28,7 @@ struct Cli {
     #[arg(long, global = true, value_name = "FILE", conflicts_with = "record")]
     fixture: Option<PathBuf>,
 
-    /// Record the session to FILE; unsupported for keymap set/restore (see docs/FIXTURES.md).
+    /// Record the session to FILE; unsupported for keymap set/restore/reset (see docs/FIXTURES.md).
     #[arg(long, global = true, value_name = "FILE")]
     record: Option<PathBuf>,
 
@@ -299,6 +300,7 @@ mod tests {
                 "--backup",
                 "before.json",
             ],
+            vec!["openkeychron", "keymap", "reset", "--backup", "before.json"],
         ] {
             for destination in ["before.json", "source.json", "elsewhere.toml"] {
                 let mut arguments = arguments.clone();
@@ -331,6 +333,7 @@ mod tests {
                 "--backup",
                 "before.json",
             ],
+            vec!["openkeychron", "keymap", "reset", "--backup", "before.json"],
         ] {
             let mut arguments = arguments;
             arguments.extend(["--fixture", "fixture-that-must-not-be-opened.toml"]);

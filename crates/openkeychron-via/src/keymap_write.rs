@@ -116,6 +116,14 @@ impl<T: HidTransport> Via<T> {
         Ok(())
     }
 
+    /// Writes: `dynamic_keymap_reset` (`0x06`) rewrites every matrix and encoder assignment
+    /// on every layer with the firmware's built-in defaults. In the pinned Keychron source it
+    /// leaves macros, lighting and settings alone. Save a complete backup first: the defaults
+    /// are unknown to us, so nothing can be read back to verify them.
+    pub fn reset_keymap(&mut self) -> Result<(), ViaError> {
+        self.exchange(Command::ResetKeymap, &[]).map(|_| ())
+    }
+
     fn read_address(&mut self, command: Command, address: [u8; 3]) -> Result<Keycode, ViaError> {
         let reply = self.exchange(command, &address)?;
         validate_address(&reply, command, address)?;

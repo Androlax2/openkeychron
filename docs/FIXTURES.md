@@ -58,9 +58,9 @@ file does not mean detection succeeded. Failed writes and non-timeout I/O errors
 fixture events, so a disconnected device may leave only the earlier exchanges. If saving
 also fails, the error reports both failures. `keymap show --record <file>` likewise saves
 completed exchanges when its read fails, and prints no success output until finalization
-passes. The backed-up keymap editing commands also finalize their sessions on failure;
-unavailable `keymap reset` opens no session. RGB and settings commands currently save
-only on success. `keymap set` and `keymap restore` reject `--record` and cannot create
+passes. The backed-up keymap editing commands also finalize their sessions on failure.
+RGB and settings commands currently save only on success. `keymap set`, `keymap restore`
+and `keymap reset` reject `--record` and cannot create
 recording sessions, so recording finalization cannot overwrite their protected backups.
 All keymap-edit tests replay explicitly synthetic traffic, not hardware.
 

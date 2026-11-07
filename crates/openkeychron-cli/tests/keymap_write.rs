@@ -550,19 +550,113 @@ mod tests {
         assert_eq!(saved_backup(&backup), original_backup());
     }
 
+    fn reset(scratch: &Scratch, fixture: &Fixture, backup: &Path) -> Output {
+        run(
+            scratch,
+            fixture,
+            &[
+                "keymap",
+                "reset",
+                "--backup",
+                backup.to_str().unwrap(),
+                "--json",
+            ],
+        )
+    }
+
     #[test]
-    fn write_reset_is_unavailable_without_opening_a_session_or_creating_a_backup() {
+    fn write_reset_saves_the_complete_keymap_before_sending_the_reset() {
         let scratch = Scratch::new();
         let backup = scratch.path("before-reset.json");
-        let mut fixture = fixture("cli-keymap-set.toml");
+        let output = reset(&scratch, &fixture("cli-keymap-reset.toml"), &backup);
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert_eq!(saved_backup(&backup), original_backup());
+        let json: Value = serde_json::from_str(&stdout(&output)).unwrap();
+        assert_eq!(json["operation"], "reset");
+        assert_eq!(json["backup"], backup.to_str().unwrap());
+    }
+
+    #[test]
+    fn write_reset_refuses_an_existing_backup_path_before_sending_the_reset() {
+        let scratch = Scratch::new();
+        let backup = scratch.path("existing.json");
+        std::fs::write(&backup, "keep this existing backup").unwrap();
+        let output = reset(&scratch, &capture_only("cli-keymap-reset.toml"), &backup);
+        failed(&output, "cannot save new keymap backup");
+        assert!(
+            !stderr(&output).contains("unexpected write"),
+            "{}",
+            stderr(&output)
+        );
+        assert_eq!(
+            std::fs::read_to_string(&backup).unwrap(),
+            "keep this existing backup"
+        );
+    }
+
+    #[test]
+    fn write_reset_refuses_the_receiver_before_reports() {
+        let scratch = Scratch::new();
+        let backup = scratch.path("before-reset.json");
+        let mut fixture = fixture("cli-keymap-reset.toml");
+        fixture.device.product_id = 0xd030;
         fixture.events.clear();
+        let output = reset(&scratch, &fixture, &backup);
+        failed(&output, "USB cable");
+        assert!(!backup.exists());
+    }
+
+    #[test]
+    fn write_reset_rejected_by_the_firmware_retains_the_backup_without_success() {
+        let scratch = Scratch::new();
+        let backup = scratch.path("before-reset.json");
+        let mut fixture = fixture("cli-keymap-reset.toml");
+        fixture.events.truncate(28);
+        reply(&mut fixture, 27)[0] = 0xff;
+        let output = reset(&scratch, &fixture, &backup);
+        failed(&output, "may have changed");
+        assert!(
+            stderr(&output).contains("keymap restore"),
+            "{}",
+            stderr(&output)
+        );
+        assert_eq!(saved_backup(&backup), original_backup());
+    }
+
+    #[test]
+    fn write_reset_followed_by_a_changed_layer_count_retains_the_backup_without_success() {
+        let scratch = Scratch::new();
+        let backup = scratch.path("before-reset.json");
+        let mut fixture = fixture("cli-keymap-reset.toml");
+        fixture.events.truncate(30);
+        reply(&mut fixture, 29)[1] = 2;
+        let output = reset(&scratch, &fixture, &backup);
+        failed(&output, "may have changed");
+        assert_eq!(saved_backup(&backup), original_backup());
+    }
+
+    #[test]
+    fn write_reset_refuses_recording_before_opening_a_session() {
+        let scratch = Scratch::new();
+        let backup = scratch.path("before-reset.json");
+        let recording = scratch.path("reset.toml");
+        let mut session = fixture("cli-keymap-reset.toml");
+        session.events.clear();
         let output = run(
             &scratch,
-            &fixture,
-            &["keymap", "reset", "--backup", backup.to_str().unwrap()],
+            &session,
+            &[
+                "keymap",
+                "reset",
+                "--backup",
+                backup.to_str().unwrap(),
+                "--record",
+                recording.to_str().unwrap(),
+            ],
         );
-        failed(&output, "reset is unavailable");
+        failed(&output, "--record");
         assert!(!backup.exists());
+        assert!(!recording.exists());
     }
 
     #[test]
