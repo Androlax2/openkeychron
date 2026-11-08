@@ -1,0 +1,3 @@
+# app/ is a one-package pnpm workspace; pnpm reads its settings from this file.
+packages:
+  - "."
