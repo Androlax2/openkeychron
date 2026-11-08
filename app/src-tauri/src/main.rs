@@ -41,6 +41,7 @@ fn main() -> ExitCode {
             commands::read_settings,
             commands::set_keycode,
             commands::undo_keymap_change,
+            commands::redo_keymap_change,
             commands::restore_keymap_backup,
         ])
         .run(tauri::generate_context!());

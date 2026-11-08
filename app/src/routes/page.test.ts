@@ -145,6 +145,7 @@ describe("the start page", () => {
     const afterWrite: EditableKeymap = {
       keymap: withKeycode(KEYMAP, position, 0x0029, "ESC"),
       undoSteps: 1,
+      redoSteps: 0,
       canRestoreBackup: true,
     };
     const writes: unknown[] = [];

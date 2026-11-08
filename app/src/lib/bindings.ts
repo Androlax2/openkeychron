@@ -66,6 +66,10 @@ export type EditableKeymap = { keymap: Keymap,
  */
 undoSteps: number, 
 /**
+ * How many changes Redo can put back, one at a time, the last one undone first.
+ */
+redoSteps: number, 
+/**
  * True once the app holds the keymap from before its first change on this device.
  */
 canRestoreBackup: boolean, };

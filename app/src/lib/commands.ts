@@ -19,7 +19,7 @@ export const readInfo = (path: string): Promise<DeviceInfo> => invoke("read_info
 export const readKeymap = (path: string): Promise<EditableKeymap> =>
   invoke("read_keymap", { path });
 
-// The three keymap writes. Each goes through the guarded write path: refused for a receiver or
+// The four keymap writes. Each goes through the guarded write path: refused for a receiver or
 // an unverified model, the keymap it replaces kept in memory first, the whole keymap read back.
 // Each resolves with the keymap read again after the write.
 
@@ -29,6 +29,10 @@ export const setKeycode = (path: string, assignment: KeyAssignment): Promise<Edi
 /** Takes back the newest keymap change the app made on the device. */
 export const undoKeymapChange = (path: string): Promise<EditableKeymap> =>
   invoke("undo_keymap_change", { path });
+
+/** Puts back the keymap change the newest undo on the device took back. */
+export const redoKeymapChange = (path: string): Promise<EditableKeymap> =>
+  invoke("redo_keymap_change", { path });
 
 /** Puts back the keymap from before the app's first change on the device. */
 export const restoreKeymapBackup = (path: string): Promise<EditableKeymap> =>

@@ -118,6 +118,7 @@ export const KEYMAP: Keymap = {
 export const EDITABLE_KEYMAP: EditableKeymap = {
   keymap: KEYMAP,
   undoSteps: 0,
+  redoSteps: 0,
   canRestoreBackup: false,
 };
 

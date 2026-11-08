@@ -1,7 +1,13 @@
 <script lang="ts">
 import type { EditableKeymap, Key } from "./bindings";
 import { KEYCODE_CATEGORIES } from "./bindings";
-import { readKeymap, restoreKeymapBackup, setKeycode, undoKeymapChange } from "./commands";
+import {
+  readKeymap,
+  redoKeymapChange,
+  restoreKeymapBackup,
+  setKeycode,
+  undoKeymapChange,
+} from "./commands";
 import type { KeySelection } from "./Keyboard.svelte";
 import KeycodePicker from "./KeycodePicker.svelte";
 import { describeKeycode } from "./keycode-text";
@@ -118,6 +124,10 @@ function undo(): void {
   write("Undoing…", "Undone", "Cannot undo", () => undoKeymapChange(path));
 }
 
+function redo(): void {
+  write("Redoing…", "Redone", "Cannot redo", () => redoKeymapChange(path));
+}
+
 function restoreBackup(): void {
   write("Restoring the backup…", "Backup restored", "Cannot restore the backup", () =>
     restoreKeymapBackup(path),
@@ -161,6 +171,14 @@ function restoreBackup(): void {
     </button>
     <button
       type="button"
+      disabled={editable.redoSteps === 0 || pending !== null}
+      aria-describedby="{id}-history"
+      onclick={redo}
+    >
+      Redo{editable.redoSteps === 0 ? "" : ` (${editable.redoSteps})`}
+    </button>
+    <button
+      type="button"
       disabled={!editable.canRestoreBackup || pending !== null}
       aria-describedby="{id}-history"
       onclick={restoreBackup}
@@ -173,8 +191,9 @@ function restoreBackup(): void {
     <p class="apply-hint" id="{id}-apply-hint">{applyHint}</p>
   {/if}
   <p id="{id}-history">
-    Undo takes back the app's changes one at a time. Restore backup puts back the keymap from before
-    the app's first change on this keyboard. Both are kept until the app quits.
+    Undo takes back the app's changes one at a time, and Redo puts back what Undo took back until
+    the next change. Restore backup puts back the keymap from before the app's first change on this
+    keyboard. All are kept until the app quits.
   </p>
 
   <p role="status" aria-busy={pending !== null}>
