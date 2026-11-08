@@ -1,5 +1,6 @@
 //! `set_key_color` inside a per-key write: the previous colour is set again when the new one does
-//! not read back, and a colour is saved only when it did.
+//! not read back, whether it reads back different or the read-back gets no reply, and a colour is
+//! saved only when it did.
 
 #[cfg(test)]
 mod tests {
@@ -69,7 +70,25 @@ mod tests {
             result,
             Err(GuardedWriteError::AfterBackup {
                 error: TestError::Guard(GuardError::PerKeyColorRolledBack {
-                    mismatch: mismatch_on_read_back()
+                    failure: mismatch_on_read_back()
+                }),
+                backup: Box::new((38, PREVIOUS_COLOR)),
+            })
+        );
+        // The fixture holds the second write and its read-back, and ends before any save.
+        transport.finish().unwrap();
+    }
+
+    #[test]
+    fn sets_the_previous_colour_again_and_saves_nothing_when_the_read_back_gets_no_reply() {
+        let (result, transport) = set_key_a_to_red(ReplayTransport::new(fixture(
+            "cli-rgb-key-read-back-timeout.toml",
+        )));
+        assert_eq!(
+            result,
+            Err(GuardedWriteError::AfterBackup {
+                error: TestError::Guard(GuardError::PerKeyColorRolledBack {
+                    failure: KeychronError::Transport(TransportError::Timeout),
                 }),
                 backup: Box::new((38, PREVIOUS_COLOR)),
             })
@@ -85,13 +104,13 @@ mod tests {
         let transport = first_events("cli-rgb-key-mismatch.toml", 14);
         let (result, _) = set_key_a_to_red(transport);
         let Err(GuardedWriteError::AfterBackup {
-            error: TestError::Guard(GuardError::PerKeyColorRollbackFailed { mismatch, restore }),
+            error: TestError::Guard(GuardError::PerKeyColorRollbackFailed { failure, restore }),
             backup,
         }) = result
         else {
             panic!("expected a failed rollback, got {result:?}");
         };
-        assert_eq!(mismatch, mismatch_on_read_back());
+        assert_eq!(failure, mismatch_on_read_back());
         assert!(
             matches!(
                 restore,
@@ -103,9 +122,9 @@ mod tests {
     }
 
     #[test]
-    fn does_not_set_the_previous_colour_again_when_the_first_write_gets_no_answer() {
-        // Events 0..10 of the fixture end with the capture (event 9), so the first write has no
-        // answer.
+    fn does_not_set_the_previous_colour_again_when_the_first_write_is_not_sent() {
+        // Events 0..10 of the fixture end with the capture (event 9), so the replay refuses the
+        // first write.
         let transport = first_events("cli-rgb-key-mismatch.toml", 10);
         let (result, _) = set_key_a_to_red(transport);
         assert!(

@@ -2,7 +2,7 @@
 //! step gets only a read-only wrapper; the write step gets the client with `set_rgb_value`,
 //! `set_color`, `set_regions`, `set_effects` and `save` once the backup is kept.
 
-use openkeychron_hid::HidTransport;
+use openkeychron_hid::{HidTransport, TransportError};
 use openkeychron_keychron::{
     FirmwareVersion, Keychron, KeychronError, MatrixSize, MixedEffect, MixedRgb, NotReported,
     PerKeyColor, PerKeyRgb,
@@ -80,8 +80,9 @@ where
 /// `hue` and `saturation`, reads it back, and saves it only if it matches. `previous` is the
 /// colour captured before the backup was kept.
 ///
-/// On a read-back mismatch the previous colour is set again before failing. Left in RAM, the
-/// wrong colour would reach EEPROM with the next Keychron RGB save, from this tool or any other.
+/// When the colour may have reached the keyboard but did not read back as written, the previous
+/// colour is set again before failing. Left in RAM, the wrong colour would reach EEPROM with the
+/// next Keychron RGB save, from this tool or any other.
 pub fn set_key_color<T: HidTransport>(
     rgb: &mut PerKeyRgb<'_, T>,
     led: u8,
@@ -97,13 +98,26 @@ pub fn set_key_color<T: HidTransport>(
     };
     match rgb.set_color(led, wanted) {
         Ok(()) => {}
-        Err(mismatch @ KeychronError::ReadBackMismatch { .. }) => {
+        // Only these two prove no keyboard holds the new colour: the LED range check runs before
+        // anything is sent, and `UnexpectedWrite` comes only from a replay, which has no
+        // keyboard behind it and would refuse the rollback's write too.
+        Err(
+            unsent @ (KeychronError::Invalid(_)
+            | KeychronError::Transport(TransportError::UnexpectedWrite { .. })),
+        ) => return Err(unsent.into()),
+        // Any other failure may follow a write the keyboard applied: the same timeout, short
+        // reply, wrong reply or refusal can come from the `A8 0A` reply or from the `A8 09`
+        // read-back, and a `Device` error from either the write or a read. Setting the previous
+        // colour again is harmless if the new one never landed, so the unknown case rolls back.
+        // A late reply to the failed exchange cannot fake a rollback: it shifts every reply
+        // after it by one, so the rollback's `A8 09` gets an `A8 0A` reply, or its `A8 0A` an
+        // `A8 09` one, and fails as `WrongReply`.
+        Err(failure) => {
             return Err(match rgb.set_color(led, previous) {
-                Ok(()) => GuardError::PerKeyColorRolledBack { mismatch },
-                Err(restore) => GuardError::PerKeyColorRollbackFailed { mismatch, restore },
+                Ok(()) => GuardError::PerKeyColorRolledBack { failure },
+                Err(restore) => GuardError::PerKeyColorRollbackFailed { failure, restore },
             });
         }
-        Err(other) => return Err(other.into()),
     }
     rgb.save()?;
     Ok(())
