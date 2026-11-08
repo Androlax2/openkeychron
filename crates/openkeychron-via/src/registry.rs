@@ -8,7 +8,8 @@ use std::collections::BTreeMap;
 
 use thiserror::Error;
 
-use crate::{KeyboardLayout, V5_MAX_FR_ISO, ViaDefinition};
+use crate::keycode_name::{V5_MAX_KEYCHRON_NAMES, keychron_name};
+use crate::{KeyboardLayout, Keycode, V5_MAX_FR_ISO, ViaDefinition};
 
 /// A model's layout: a table compiled into openkeychron, or one read from a VIA definition.
 #[derive(Debug, Clone, PartialEq)]
@@ -65,12 +66,15 @@ pub enum WriteAccess {
     ReadOnly,
 }
 
-/// One known model: its name, its layout and whether it may be written.
+/// One known model: its name, its layout, whether it may be written and the names of its
+/// Keychron custom keycodes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RegisteredModel {
     name: String,
     layout: RegisteredLayout,
     write_access: WriteAccess,
+    /// From `QK_KB_0` up, as this model's firmware source settles them; empty when it does not.
+    keychron_names: &'static [&'static str],
 }
 
 impl RegisteredModel {
@@ -87,6 +91,15 @@ impl RegisteredModel {
     #[must_use]
     pub fn write_access(&self) -> WriteAccess {
         self.write_access
+    }
+
+    /// [`Keycode::name`], or this model's name for a Keychron custom keycode when its firmware
+    /// source settles it. A model read from a definition file names none.
+    #[must_use]
+    pub fn keycode_name(&self, keycode: Keycode) -> Option<String> {
+        keycode
+            .name()
+            .or_else(|| keychron_name(keycode, self.keychron_names).map(str::to_owned))
     }
 }
 
@@ -119,6 +132,7 @@ impl DeviceRegistry {
                     name: "V5 Max ISO".to_owned(),
                     layout: RegisteredLayout::BuiltIn(&V5_MAX_FR_ISO),
                     write_access: WriteAccess::VerifiedOverCable,
+                    keychron_names: V5_MAX_KEYCHRON_NAMES,
                 },
             )]),
         }
@@ -141,6 +155,8 @@ impl DeviceRegistry {
                 name: definition.name.clone(),
                 layout: RegisteredLayout::Definition(definition),
                 write_access: WriteAccess::ReadOnly,
+                // A definition's customKeycodes are Launcher labels, not firmware names.
+                keychron_names: &[],
             },
         );
         Ok(())
