@@ -33,6 +33,18 @@ pub enum GuardError {
     #[error(transparent)]
     Keychron(#[from] KeychronError),
 
+    #[error("{mismatch}; the previous colour is set again and nothing was saved")]
+    PerKeyColorRolledBack { mismatch: KeychronError },
+
+    #[error(
+        "{mismatch}; setting the previous colour again also failed ({restore}); nothing was \
+         saved, and unplugging the keyboard drops the change"
+    )]
+    PerKeyColorRollbackFailed {
+        mismatch: KeychronError,
+        restore: KeychronError,
+    },
+
     #[error("invalid keymap backup: {0}")]
     InvalidKeymapBackup(String),
 

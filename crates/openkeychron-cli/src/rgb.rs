@@ -6,9 +6,9 @@
 use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
-use openkeychron_guard::rgb::{PerKeyReader, write_lighting, write_per_key};
+use openkeychron_guard::rgb::{PerKeyReader, set_key_color, write_lighting, write_per_key};
 use openkeychron_guard::{GuardedWriteError, WriteVerified, require_write_verified};
-use openkeychron_keychron::{Keychron, KeychronError, MatrixSize, PerKeyColor, PerKeyRgb};
+use openkeychron_keychron::{Keychron, MatrixSize, PerKeyColor, PerKeyRgb};
 use openkeychron_via::{RgbMatrix, RgbValue, V5_MAX_FR_ISO, Via, brightness_to_store};
 use serde::Serialize;
 
@@ -263,30 +263,7 @@ fn write_key_color(
         saturation: previous.saturation,
         value: previous.value,
     };
-    // Every per-key effect ignores the stored value, so keeping it changes nothing visible.
-    let wanted = PerKeyColor {
-        hue,
-        saturation,
-        value: previous.value,
-    };
-    match rgb.set_color(led, wanted) {
-        Ok(()) => {}
-        // Left in RAM, the wrong colour would reach EEPROM with the next Keychron RGB save, from
-        // this tool or any other.
-        Err(error @ KeychronError::ReadBackMismatch { .. }) => {
-            return Err(match rgb.set_color(led, previous_color) {
-                Ok(()) => SessionError::Keychron(format!(
-                    "{error}; the previous colour is set again and nothing was saved"
-                )),
-                Err(restore) => SessionError::Keychron(format!(
-                    "{error}; setting the previous colour again also failed ({restore}); \
-                     nothing was saved, and unplugging the keyboard drops the change"
-                )),
-            });
-        }
-        Err(other) => return Err(other.into()),
-    }
-    rgb.save()?;
+    set_key_color(rgb, led, previous_color, hue, saturation)?;
 
     println!(
         "Key `{}` ({},{}, LED {led}) set to hue {hue}, saturation {saturation}; it reads back \

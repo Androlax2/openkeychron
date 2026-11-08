@@ -76,6 +76,39 @@ where
     keep_then_write(backup, keep, |backup| write(&mut rgb, backup, plan))
 }
 
+/// The write step of a per-key colour change, for [`write_per_key`]: sets one LED's colour to
+/// `hue` and `saturation`, reads it back, and saves it only if it matches. `previous` is the
+/// colour captured before the backup was kept.
+///
+/// On a read-back mismatch the previous colour is set again before failing. Left in RAM, the
+/// wrong colour would reach EEPROM with the next Keychron RGB save, from this tool or any other.
+pub fn set_key_color<T: HidTransport>(
+    rgb: &mut PerKeyRgb<'_, T>,
+    led: u8,
+    previous: PerKeyColor,
+    hue: u8,
+    saturation: u8,
+) -> Result<(), GuardError> {
+    // Every per-key effect ignores the stored value, so keeping it changes nothing visible.
+    let wanted = PerKeyColor {
+        hue,
+        saturation,
+        value: previous.value,
+    };
+    match rgb.set_color(led, wanted) {
+        Ok(()) => {}
+        Err(mismatch @ KeychronError::ReadBackMismatch { .. }) => {
+            return Err(match rgb.set_color(led, previous) {
+                Ok(()) => GuardError::PerKeyColorRolledBack { mismatch },
+                Err(restore) => GuardError::PerKeyColorRollbackFailed { mismatch, restore },
+            });
+        }
+        Err(other) => return Err(other.into()),
+    }
+    rgb.save()?;
+    Ok(())
+}
+
 /// The mixed RGB reads a mixed RGB write needs before its backup, and no write.
 pub struct MixedReader<'a, 'keychron, T>(&'a mut MixedRgb<'keychron, T>);
 
