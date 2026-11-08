@@ -113,6 +113,32 @@ any command against a recording the same way:
 cargo run -p openkeychron-cli -- info --fixture fixtures/synthetic/cli-info.toml
 ```
 
+### The app in mock mode
+
+Set `OPENKEYCHRON_FIXTURE` to a directory of fixtures and the app talks to them instead of the
+connected keyboards. Give an absolute path: a relative one is resolved from the app's working
+directory, not the repository root.
+
+```sh
+mkdir -p /tmp/openkeychron-mock
+cp fixtures/synthetic/cli-keymap.toml fixtures/synthetic/cli-settings-get.toml /tmp/openkeychron-mock/
+OPENKEYCHRON_FIXTURE=/tmp/openkeychron-mock pnpm --dir app tauri dev
+```
+
+- Each `.toml` file in the directory is one device, listed in file name order with the path
+  `fixture:<directory>/<file>`. Other files are skipped. The app never looks for a keyboard in
+  mock mode.
+- Every command replays its device's fixture from the start through `ReplayTransport`, like the
+  CLI's `--fixture`. A device therefore answers only the command its fixture recorded, as often
+  as the UI asks: `cli-keymap.toml` answers `read_keymap`, and any other command on it fails
+  with the replay's "write #0 sent …" error.
+- Writes are checked against the fixture in memory and go nowhere else: not to a keyboard, not
+  to the file, and not into the next command. A later read still returns what the fixture
+  recorded, not what was written.
+- The app refuses to start when the variable is empty, the directory cannot be read or holds
+  no `.toml` file, or a fixture is invalid or not from a Keychron VIA interface. The reason is
+  printed on stderr.
+
 ## Talking to the real keyboard (Linux)
 
 When both a keyboard and receiver are connected, `openkeychron list` shows their paths.

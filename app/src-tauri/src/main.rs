@@ -10,12 +10,25 @@ mod info;
 mod keymap;
 mod macros;
 mod settings;
+mod source;
 #[cfg(test)]
 mod test_support;
 
-fn main() -> Result<(), tauri::Error> {
-    tauri::Builder::default()
+use std::process::ExitCode;
+
+use source::{DeviceSource, FIXTURE_VARIABLE};
+
+fn main() -> ExitCode {
+    let source = match DeviceSource::from_variable(std::env::var_os(FIXTURE_VARIABLE)) {
+        Ok(source) => source,
+        Err(error) => {
+            eprintln!("openkeychron: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let app = tauri::Builder::default()
         .manage(commands::DeviceAccess::default())
+        .manage(source)
         .invoke_handler(tauri::generate_handler![
             commands::list_devices,
             commands::read_info,
@@ -23,5 +36,12 @@ fn main() -> Result<(), tauri::Error> {
             commands::read_macros,
             commands::read_settings,
         ])
-        .run(tauri::generate_context!())
+        .run(tauri::generate_context!());
+    match app {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("openkeychron: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }

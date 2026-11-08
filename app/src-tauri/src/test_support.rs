@@ -1,6 +1,6 @@
 //! Runs the commands' read functions against a synthetic fixture instead of hardware.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use openkeychron_hid::{
@@ -38,10 +38,13 @@ pub fn replay_fixture(fixture: Fixture) -> Replay {
 }
 
 pub fn load_fixture(name: &str) -> Fixture {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+    Fixture::load(&synthetic_path(name)).unwrap()
+}
+
+pub fn synthetic_path(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/synthetic")
-        .join(name);
-    Fixture::load(&path).unwrap()
+        .join(name)
 }
 
 impl Replay {
