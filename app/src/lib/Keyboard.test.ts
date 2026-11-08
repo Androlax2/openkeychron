@@ -1,6 +1,6 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, describe, expect, it } from "vitest";
-import { KEYMAP } from "../test/synthetic-keymap";
+import { KEYMAP, withKeycode } from "../test/synthetic-keymap";
 import type { Keymap } from "./bindings";
 import Keyboard, { KEY_UNIT, type KeySelection } from "./Keyboard.svelte";
 
@@ -237,6 +237,32 @@ describe("Keyboard", () => {
     const keycode = keyNamed(view, "A").querySelector<SVGTextElement>("text.keycode");
     // "LT(1, SPC)": an estimated 10 × 6px in the 40px between the 1u key's 10px margins.
     expect(keycode?.style.fontSize).toBe(`${(9 * 40) / 60}px`);
+  });
+
+  describe("a 26-character name on a 1u key", () => {
+    const MOD_TAP_NAME = "MT(MOD_LCTL | MOD_LGUI, A)";
+    const withLongName = (name: string) =>
+      withKeycode(KEYMAP, { layer: 0, row: 1, column: 0 }, 0x2304, name);
+
+    it("is cut with an ellipsis at a readable size", () => {
+      const view = render(withLongName(MOD_TAP_NAME));
+      const keycode = keyNamed(view, "A").querySelector<SVGTextElement>("text.keycode");
+      expect(keycode?.textContent?.trim().endsWith("…")).toBe(true);
+      expect(keycode?.style.fontSize).toBe("6px");
+    });
+
+    it("keeps the full name in the hover title and the accessible name", () => {
+      const view = render(withLongName(MOD_TAP_NAME));
+      const key = keyNamed(view, "A");
+      expect(key.querySelector("title")?.textContent).toBe(`${MOD_TAP_NAME} (0x2304)`);
+      expect(key.getAttribute("aria-label")).toContain(MOD_TAP_NAME);
+    });
+
+    it("is written as QMK's shorthand when QMK has one", () => {
+      const view = render(withLongName("LCTL(LSFT(LALT(LGUI(A))))"));
+      const keycode = keyNamed(view, "A").querySelector<SVGTextElement>("text.keycode");
+      expect(keycode?.textContent?.trim()).toBe("HYPR(A)");
+    });
   });
 
   it("moves between layer tabs with the arrow keys", () => {
