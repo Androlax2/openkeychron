@@ -189,7 +189,7 @@ mod tests {
 
     fn via(sessions: &[Vec<Event>]) -> Via<ReplayTransport> {
         let device = DeviceIdentity {
-            name: "synthetic".to_owned(),
+            name: Some("synthetic".to_owned()),
             vendor_id: 0x3434,
             product_id: 0x0951,
             usage_page: 0xff60,

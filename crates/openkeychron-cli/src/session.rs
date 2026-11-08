@@ -190,7 +190,7 @@ impl<T: HidTransport> Session<T> {
                         .device
                         .name
                         .clone()
-                        .unwrap_or_else(|| "(no product name)".to_owned()),
+                        .filter(|name| !name.trim().is_empty()),
                     vendor_id: self.device.vendor_id,
                     product_id: self.device.product_id,
                     usage_page: VIA_USAGE_PAGE,
@@ -269,7 +269,7 @@ fn listed_paths(devices: &[KeychronDevice]) -> String {
 fn fixture_device(fixture: &Fixture, path: &Path) -> Result<KeychronDevice, SessionError> {
     let identity = &fixture.device;
     let interface = HidInterface {
-        name: Some(identity.name.clone()),
+        name: identity.name.clone(),
         vendor_id: identity.vendor_id,
         product_id: identity.product_id,
         usage_page: identity.usage_page,
@@ -298,11 +298,11 @@ mod tests {
     use std::time::Duration;
 
     use openkeychron_hid::{
-        Event, Fixture, HidTransport, KeychronDevice, RecordingTransport, ReplayTransport,
-        TransportError,
+        DeviceIdentity, Event, Fixture, HidTransport, KeychronDevice, RecordingTransport,
+        ReplayTransport, TransportError,
     };
 
-    use super::{Link, Session, SessionError, choose_device};
+    use super::{Link, Session, SessionError, choose_device, fixture_device};
 
     #[derive(Debug)]
     struct TimedReplay {
@@ -349,6 +349,70 @@ mod tests {
             let recorded = Fixture::load(&path).unwrap();
             assert_eq!(recorded.events, fixture.events);
             std::fs::remove_file(&path).unwrap();
+        }
+    }
+
+    #[test]
+    fn recording_a_device_without_a_usable_name_replays_as_nameless() {
+        for (case, reported_name) in [None, Some(String::new()), Some("  ".to_owned())]
+            .into_iter()
+            .enumerate()
+        {
+            let path = std::env::temp_dir().join(format!(
+                "openkeychron-nameless-{}-{case}.toml",
+                std::process::id()
+            ));
+            let empty_session = Fixture::new(recorded_identity(), Vec::new());
+            let session = Session {
+                device: KeychronDevice {
+                    name: reported_name.clone(),
+                    ..device("synthetic", 0x0951)
+                },
+                link: Link::Recording {
+                    transport: RecordingTransport::new(ReplayTransport::new(empty_session)),
+                    path: path.clone(),
+                },
+                reply_timeout: None,
+            };
+            session.finish().unwrap();
+
+            let recorded = Fixture::load(&path);
+            std::fs::remove_file(&path).unwrap();
+            let recorded = recorded.unwrap();
+            let replayed = fixture_device(&recorded, &path).unwrap();
+            assert_eq!(recorded.device.name, None, "reported {reported_name:?}");
+            assert_eq!(replayed.name, None, "reported {reported_name:?}");
+        }
+    }
+
+    #[test]
+    fn recording_a_named_device_keeps_its_name() {
+        let path =
+            std::env::temp_dir().join(format!("openkeychron-named-{}.toml", std::process::id()));
+        let session = Session {
+            device: device("synthetic", 0x0951),
+            link: Link::Recording {
+                transport: RecordingTransport::new(ReplayTransport::new(Fixture::new(
+                    recorded_identity(),
+                    Vec::new(),
+                ))),
+                path: path.clone(),
+            },
+            reply_timeout: None,
+        };
+        session.finish().unwrap();
+        let recorded = Fixture::load(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(recorded.device.name.as_deref(), Some("test"));
+    }
+
+    fn recorded_identity() -> DeviceIdentity {
+        DeviceIdentity {
+            name: None,
+            vendor_id: 0x3434,
+            product_id: 0x0951,
+            usage_page: 0xff60,
+            usage: 0x61,
         }
     }
 

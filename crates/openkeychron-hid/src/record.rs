@@ -62,7 +62,7 @@ mod tests {
 
     fn device() -> DeviceIdentity {
         DeviceIdentity {
-            name: "test".to_owned(),
+            name: Some("test".to_owned()),
             vendor_id: 0x3434,
             product_id: 0x0001,
             usage_page: 0xff60,
