@@ -4,12 +4,11 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use clap::Args;
-use openkeychron_hid::KeychronDevice;
-use openkeychron_via::{EncoderDirection, Keycode, V5_MAX_FR_ISO, Via};
+use openkeychron_guard::keymap::{self, KeymapBackup};
 
-use crate::guarded_write::{self, ViaReader, WriteKind};
-use crate::keymap_backup::{BACKUP_VERSION, BackupDevice, EncoderPair, KeymapBackup, LAYOUT_ID};
-use crate::session::{Session, SessionError};
+use crate::backup_file;
+use crate::guarded_write::{self, WriteKind};
+use crate::session::SessionError;
 
 const KEYMAP_WRITE: WriteKind = WriteKind {
     command: "keymap",
@@ -86,42 +85,14 @@ pub(crate) fn set(
     device: Option<&Path>,
     json: bool,
 ) -> Result<(), SessionError> {
-    if V5_MAX_FR_ISO.key(args.key.row, args.key.column).is_none() {
-        return Err(SessionError::Usage(format!(
-            "no physical key at ({}, {}) in the supported V5 Max ISO layout",
-            args.key.row, args.key.column
-        )));
-    }
+    let key = keymap::KeyPosition::new(args.key.row, args.key.column)?;
     guarded_write::run(
         &KEYMAP_WRITE,
         fixture,
         device,
         &args.backup,
-        |reader, identity| {
-            let previous = capture(reader, identity, None)?;
-            if args.layer >= previous.layer_count {
-                return Err(SessionError::Usage(format!(
-                    "layer {} is unavailable; select 0..={}",
-                    args.layer,
-                    previous.layer_count - 1
-                )));
-            }
-            Ok((previous, ()))
-        },
-        |via, identity, mut expected, ()| {
-            let offset = (usize::from(args.layer) * usize::from(expected.rows)
-                + usize::from(args.key.row))
-                * usize::from(expected.columns)
-                + usize::from(args.key.column);
-            expected.matrix[offset] = args.keycode;
-            via.write_keycode(
-                args.layer,
-                args.key.row,
-                args.key.column,
-                Keycode::from(args.keycode),
-            )
-            .map_err(|error| SessionError::via(&error, false))?;
-            verify(via, identity, &expected)
+        |via, verified, keep| {
+            keymap::set_keycode(via, verified, args.layer, key, args.keycode, keep)
         },
     )?;
     guarded_write::print_success(
@@ -139,36 +110,13 @@ pub(crate) fn restore(
     device: Option<&Path>,
     json: bool,
 ) -> Result<(), SessionError> {
-    let wanted = KeymapBackup::load(&args.source)?;
+    let wanted = load_backup(&args.source)?;
     guarded_write::run(
         &KEYMAP_WRITE,
         fixture,
         device,
         &args.backup,
-        |reader, identity| Ok((capture(reader, identity, Some(&wanted))?, ())),
-        |via, identity, _previous, ()| {
-            let matrix: Vec<_> = wanted.matrix.iter().copied().map(Keycode::from).collect();
-            via.write_keymap(&matrix)
-                .map_err(|error| SessionError::via(&error, false))?;
-            for layer in 0..wanted.layer_count {
-                let pair = &wanted.encoders[usize::from(layer)];
-                via.write_encoder_keycode(
-                    layer,
-                    0,
-                    EncoderDirection::Clockwise,
-                    Keycode::from(pair.clockwise),
-                )
-                .map_err(|error| SessionError::via(&error, false))?;
-                via.write_encoder_keycode(
-                    layer,
-                    0,
-                    EncoderDirection::CounterClockwise,
-                    Keycode::from(pair.counter_clockwise),
-                )
-                .map_err(|error| SessionError::via(&error, false))?;
-            }
-            verify(via, identity, &wanted)
-        },
+        |via, verified, keep| keymap::restore(via, verified, &wanted, keep),
     )?;
     guarded_write::print_success(
         &KEYMAP_WRITE,
@@ -190,13 +138,7 @@ pub(crate) fn reset(
         fixture,
         device,
         &args.backup,
-        // The defaults are unknown, so the verified backup of this capture is the only undo.
-        |reader, identity| Ok((capture(reader, identity, None)?, ())),
-        |via, identity, previous, ()| {
-            via.reset_keymap()
-                .map_err(|error| SessionError::via(&error, false))?;
-            capture(&mut ViaReader::new(via), identity, Some(&previous)).map(|_| ())
-        },
+        |via, verified, keep| keymap::reset(via, verified, keep),
     )?;
     guarded_write::print_success(
         &KEYMAP_WRITE,
@@ -207,80 +149,9 @@ pub(crate) fn reset(
     )
 }
 
-fn capture(
-    via: &mut ViaReader<'_>,
-    device: &KeychronDevice,
-    expected: Option<&KeymapBackup>,
-) -> Result<KeymapBackup, SessionError> {
-    let layer_count = via
-        .layer_count()
-        .map_err(|error| SessionError::via(&error, false))?;
-    let layout_options = via
-        .layout_options()
-        .map_err(|error| SessionError::via(&error, false))?;
-    if layout_options != 0
-        || expected.is_some_and(|backup| {
-            backup.layer_count != layer_count || backup.layout_options != layout_options
-        })
-    {
-        return Err(SessionError::Usage(
-            "target layout/options/layer count do not match the supported backup profile"
-                .to_owned(),
-        ));
-    }
-    let matrix = via
-        .keymap(
-            usize::from(layer_count)
-                * usize::from(V5_MAX_FR_ISO.rows)
-                * usize::from(V5_MAX_FR_ISO.columns),
-        )
-        .map_err(|error| SessionError::via(&error, false))?
-        .into_iter()
-        .map(u16::from)
-        .collect();
-    let mut encoders = Vec::with_capacity(usize::from(layer_count));
-    // The pinned V5 Max ISO definition has exactly one physical encoder, at index zero.
-    for layer in 0..layer_count {
-        encoders.push(EncoderPair {
-            clockwise: u16::from(
-                via.encoder_keycode(layer, 0, EncoderDirection::Clockwise)
-                    .map_err(|error| SessionError::via(&error, false))?,
-            ),
-            counter_clockwise: u16::from(
-                via.encoder_keycode(layer, 0, EncoderDirection::CounterClockwise)
-                    .map_err(|error| SessionError::via(&error, false))?,
-            ),
-        });
-    }
-    let backup = KeymapBackup {
-        format_version: BACKUP_VERSION,
-        device: BackupDevice {
-            vendor_id: device.vendor_id,
-            product_id: device.product_id,
-        },
-        layout: LAYOUT_ID.to_owned(),
-        layout_options,
-        rows: V5_MAX_FR_ISO.rows,
-        columns: V5_MAX_FR_ISO.columns,
-        layer_count,
-        encoder_count: 1,
-        matrix,
-        encoders,
-    };
+/// Loads and checks a keymap backup before any device is opened.
+fn load_backup(path: &Path) -> Result<KeymapBackup, SessionError> {
+    let backup: KeymapBackup = backup_file::load(path, "keymap")?;
     backup.validate()?;
     Ok(backup)
-}
-
-fn verify(
-    via: &mut Via<Session>,
-    device: &KeychronDevice,
-    expected: &KeymapBackup,
-) -> Result<(), SessionError> {
-    if capture(&mut ViaReader::new(via), device, Some(expected))? != *expected {
-        return Err(SessionError::Usage(
-            "complete matrix/encoder keymap verification did not match the expected state"
-                .to_owned(),
-        ));
-    }
-    Ok(())
 }

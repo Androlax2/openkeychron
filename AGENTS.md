@@ -33,6 +33,7 @@ before touching its area:
 | `crates/openkeychron-hid` | `HidTransport` trait, fixture format, replay and recording transports, Keychron device discovery and the `hidapi` transport |
 | `crates/openkeychron-via` | VIA protocol: versions, keymap, layers, macros (M1, M2) |
 | `crates/openkeychron-keychron` | Keychron-specific commands: RGB, debounce, LKP, wireless timers (M3) |
+| `crates/openkeychron-guard` | The guarded write path the CLI and the app share: write-verified gate, read-only capture, backup kept by the caller before any write, read-back |
 | `crates/openkeychron-cli` | The `openkeychron` binary (M1) |
 | `app/` | Tauri + SvelteKit desktop app (M4); calls the crates, holds no HID logic |
 

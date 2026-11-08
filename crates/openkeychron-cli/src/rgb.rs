@@ -6,13 +6,15 @@
 use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
-use openkeychron_keychron::{KeychronError, MatrixSize, PerKeyColor, PerKeyRgb};
+use openkeychron_guard::rgb::{PerKeyReader, write_lighting, write_per_key};
+use openkeychron_guard::{GuardedWriteError, WriteVerified, require_write_verified};
+use openkeychron_keychron::{Keychron, KeychronError, MatrixSize, PerKeyColor, PerKeyRgb};
 use openkeychron_via::{RgbMatrix, RgbValue, V5_MAX_FR_ISO, Via, brightness_to_store};
 use serde::Serialize;
 
+use crate::backup_file;
 use crate::mixed_rgb::{self, MixedAction};
 use crate::session::{Session, SessionError};
-use crate::{guarded_write, rgb_guarded_write};
 
 #[derive(Debug, Subcommand)]
 pub enum RgbAction {
@@ -115,8 +117,8 @@ pub fn run(
         }
         RgbAction::Set { backup, value } => {
             let session = Session::start(fixture, record, device)?;
-            guarded_write::require_write_verified("RGB writes", session.device())?;
-            set(session, backup, value, via_error(false))
+            let verified = require_write_verified("RGB writes", session.device())?;
+            set(session, &verified, backup, value, via_error(false))
         }
         RgbAction::Key {
             backup,
@@ -157,19 +159,23 @@ fn get(
     Ok(())
 }
 
+/// A failure returns before the session is finished, as `rgb set` always has.
 fn set(
     session: Session,
+    verified: &WriteVerified,
     backup: &Path,
     value: &Value,
     via_error: impl Fn(openkeychron_via::ViaError) -> SessionError,
 ) -> Result<(), SessionError> {
-    rgb_guarded_write::write_lighting(
-        session,
-        backup,
+    let mut via = Via::new(session);
+    write_lighting(
+        &mut via,
+        verified,
         // Reading first also proves the firmware has the lighting channel before anything changes.
-        |reader| Ok(output(reader.rgb_matrix().map_err(&via_error)?)),
-        |via, previous| {
-            let restore = restore_command(&previous, value);
+        |reader| Ok((output(reader.rgb_matrix().map_err(&via_error)?), ())),
+        |previous| backup_file::save_new(backup, "RGB", previous),
+        |via, previous, ()| {
+            let restore = restore_command(previous, value);
             let wanted = match *value {
                 Value::Brightness { value } => RgbValue::Brightness(value),
                 Value::Effect { value } => RgbValue::Effect(value),
@@ -190,6 +196,8 @@ fn set(
             Ok(())
         },
     )
+    .map_err(GuardedWriteError::into_error)?;
+    via.into_transport().finish()
 }
 
 fn set_key(
@@ -199,18 +207,23 @@ fn set_key(
     hue: u8,
     saturation: u8,
 ) -> Result<(), SessionError> {
-    guarded_write::require_write_verified("per-key RGB writes", session.device())?;
-    rgb_guarded_write::write_per_key(
-        session,
-        backup,
-        |reader| capture_key_color(reader, key),
-        |rgb, previous| write_key_color(rgb, backup, &previous, hue, saturation),
+    let verified = require_write_verified("per-key RGB writes", session.device())?;
+    let mut keychron = Keychron::new(session);
+    let result = write_per_key(
+        &mut keychron,
+        &verified,
+        |reader| Ok((capture_key_color(reader, key)?, ())),
+        |previous| backup_file::save_new(backup, "per-key RGB", previous),
+        |rgb, previous, ()| write_key_color(rgb, backup, previous, hue, saturation),
     )
+    .map(drop)
+    .map_err(GuardedWriteError::into_error);
+    keychron.into_transport().complete(result)
 }
 
 /// The LED under `key` and its colour.
 fn capture_key_color(
-    reader: &mut rgb_guarded_write::PerKeyReader<'_, '_>,
+    reader: &mut PerKeyReader<'_, '_, Session>,
     key: KeyPosition,
 ) -> Result<KeyBackup, SessionError> {
     let matrix = MatrixSize {

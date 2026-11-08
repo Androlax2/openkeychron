@@ -4,6 +4,7 @@ members = [
     "crates/openkeychron-hid",
     "crates/openkeychron-via",
     "crates/openkeychron-keychron",
+    "crates/openkeychron-guard",
     "crates/openkeychron-cli",
     "app/src-tauri",
 ]

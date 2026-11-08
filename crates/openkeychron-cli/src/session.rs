@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use openkeychron_guard::GuardError;
 use openkeychron_hid::{
     DeviceIdentity, Event, Fixture, FixtureError, HidInterface, HidTransport, HidapiTransport,
     KeychronDevice, RecordingTransport, ReplayTransport, TransportError, VIA_USAGE, VIA_USAGE_PAGE,
@@ -67,6 +68,22 @@ impl From<openkeychron_hid::DiscoveryError> for SessionError {
 impl From<openkeychron_keychron::KeychronError> for SessionError {
     fn from(error: openkeychron_keychron::KeychronError) -> Self {
         Self::Keychron(error.to_string())
+    }
+}
+
+impl From<GuardError> for SessionError {
+    fn from(error: GuardError) -> Self {
+        match error {
+            // The gate refuses receivers before any guarded write, so no receiver caveat applies.
+            GuardError::Via(error) => Self::via(&error, false),
+            GuardError::Keychron(error) => Self::from(error),
+            GuardError::MacrosDisabled => Self::Usage(
+                "the macro buffer's last byte is not 0, so an earlier write did not finish and \
+                 its content is unknown; run `openkeychron macro restore` with a backup first"
+                    .to_owned(),
+            ),
+            refusal => Self::Usage(refusal.to_string()),
+        }
     }
 }
 

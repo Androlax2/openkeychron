@@ -6,6 +6,12 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
+use openkeychron_guard::keymap::BackupDevice;
+use openkeychron_guard::rgb::{MixedReader, write_mixed};
+use openkeychron_guard::{
+    GuardedWriteError, WriteVerified, require_write_verified, write_verified_model,
+    write_verified_models_text,
+};
 use openkeychron_hid::KeychronDevice;
 use openkeychron_keychron::{
     FirmwareVersion, Keychron, KeychronError, MatrixSize, MixedEffect, MixedRgb,
@@ -13,11 +19,9 @@ use openkeychron_keychron::{
 use openkeychron_via::V5_MAX_FR_ISO;
 use serde::{Deserialize, Serialize};
 
-use crate::keymap_backup::BackupDevice;
+use crate::backup_file;
 use crate::rgb::{KeyPosition, resolve_key};
-use crate::rgb_guarded_write::{self, MixedReader};
 use crate::session::{Session, SessionError};
-use crate::{backup_file, guarded_write};
 
 const BACKUP_VERSION: u32 = 2;
 /// Backups from before #112, which do not record the firmware build.
@@ -183,7 +187,9 @@ impl MixedBackup {
                 )));
             }
         }
-        self.device.write_verified_model().map_err(invalid)?;
+        self.device
+            .write_verified_model()
+            .map_err(|error| invalid(error.to_string()))?;
         if self.regions.len() != usize::from(self.led_count) {
             return Err(invalid(format!(
                 "has {} regions for {} LEDs",
@@ -225,7 +231,7 @@ impl MixedBackup {
     fn require_layout_of(
         &self,
         path: &Path,
-        reader: &MixedReader<'_, '_>,
+        reader: &MixedReader<'_, '_, Session>,
     ) -> Result<(), SessionError> {
         let mismatch = |what: String| {
             SessionError::Usage(format!(
@@ -339,8 +345,8 @@ pub fn run(
                 .map(|key| resolve_key(key))
                 .collect::<Result<Vec<_>, _>>()?;
             let session = Session::start(fixture, record, device)?;
-            guarded_write::require_write_verified(WRITES, session.device())?;
-            set_region(session, backup, *region, &keys)
+            let verified = require_write_verified(WRITES, session.device())?;
+            set_region(session, &verified, backup, *region, &keys)
         }
         MixedAction::Effect {
             backup,
@@ -353,7 +359,7 @@ pub fn run(
             duration_ms,
         } => {
             let session = Session::start(fixture, record, device)?;
-            guarded_write::require_write_verified(WRITES, session.device())?;
+            let verified = require_write_verified(WRITES, session.device())?;
             let wanted = EffectSlot {
                 effect: *effect,
                 hue: *hue,
@@ -361,7 +367,7 @@ pub fn run(
                 speed: *speed,
                 duration_ms: *duration_ms,
             };
-            set_effect(session, backup, *region, *slot, wanted)
+            set_effect(session, &verified, backup, *region, *slot, wanted)
         }
         MixedAction::Restore {
             backup,
@@ -371,8 +377,15 @@ pub fn run(
             let restored: MixedBackup = backup_file::load(from, "mixed RGB")?;
             restored.validate(from)?;
             let session = Session::start(fixture, record, device)?;
-            guarded_write::require_write_verified(WRITES, session.device())?;
-            restore(session, backup, from, restored, *allow_other_firmware)
+            let verified = require_write_verified(WRITES, session.device())?;
+            restore(
+                session,
+                &verified,
+                backup,
+                from,
+                restored,
+                *allow_other_firmware,
+            )
         }
     }
 }
@@ -380,16 +393,14 @@ pub fn run(
 /// Key names come from the built-in V5 Max ISO table, so `get` refuses any other device, and a
 /// receiver, which does not identify the keyboard behind it.
 fn require_built_in_layout(device: &KeychronDevice) -> Result<(), SessionError> {
-    if !device.is_receiver
-        && guarded_write::write_verified_model(device.vendor_id, device.product_id).is_some()
-    {
+    if !device.is_receiver && write_verified_model(device.vendor_id, device.product_id).is_some() {
         return Ok(());
     }
     let connection = if device.is_receiver { "receiver " } else { "" };
     Err(SessionError::Usage(format!(
         "`rgb mixed get` names keys from the built-in layout of {models}, so it needs that \
          keyboard on a USB cable (got {connection}{vendor_id:04x}:{product_id:04x})",
-        models = guarded_write::write_verified_models_text(),
+        models = write_verified_models_text(),
         vendor_id = device.vendor_id,
         product_id = device.product_id,
     )))
@@ -489,13 +500,15 @@ fn describe(slot: EffectSlot) -> String {
 
 fn set_region(
     session: Session,
+    verified: &WriteVerified,
     backup: &Path,
     region: u8,
     keys: &[KeyPosition],
 ) -> Result<(), SessionError> {
     let device = backup_device(session.device());
-    rgb_guarded_write::write_mixed(
+    write_mixed_state(
         session,
+        verified,
         backup,
         |reader| {
             if region >= reader.region_count() {
@@ -510,7 +523,7 @@ fn set_region(
             Ok((previous, wanted))
         },
         |rgb, previous, wanted| {
-            apply(rgb, &wanted, &previous)?;
+            apply(rgb, &wanted, previous)?;
             let names = keys.iter().map(|key| key.legend).collect::<Vec<_>>();
             println!(
                 "Keys {} moved to mixed RGB region {region}; the whole state reads back as written \
@@ -525,14 +538,16 @@ fn set_region(
 
 fn set_effect(
     session: Session,
+    verified: &WriteVerified,
     backup: &Path,
     region: u8,
     slot: u8,
     effect: EffectSlot,
 ) -> Result<(), SessionError> {
     let device = backup_device(session.device());
-    rgb_guarded_write::write_mixed(
+    write_mixed_state(
         session,
+        verified,
         backup,
         |reader| {
             if region >= reader.region_count() {
@@ -551,7 +566,7 @@ fn set_effect(
             Ok((previous, wanted))
         },
         |rgb, previous, wanted| {
-            apply(rgb, &wanted, &previous)?;
+            apply(rgb, &wanted, previous)?;
             if effect.effect == 0 {
                 println!(
                     "Region {region}, slot {slot} emptied; the whole state reads back as written \
@@ -572,6 +587,7 @@ fn set_effect(
 
 fn restore(
     session: Session,
+    verified: &WriteVerified,
     backup: &Path,
     from: &Path,
     restored: MixedBackup,
@@ -588,8 +604,9 @@ fn restore(
             device.product_id
         )));
     }
-    rgb_guarded_write::write_mixed(
+    write_mixed_state(
         session,
+        verified,
         backup,
         |reader| {
             restored.require_layout_of(from, reader)?;
@@ -598,7 +615,7 @@ fn restore(
             Ok((capture(reader, device, firmware)?, restored))
         },
         |rgb, previous, restored| {
-            apply(rgb, &restored, &previous)?;
+            apply(rgb, &restored, previous)?;
             println!(
                 "Mixed RGB state from {} restored; it reads back as written and is saved.",
                 from.display()
@@ -618,6 +635,28 @@ fn restore(
             Ok(())
         },
     )
+}
+
+/// Runs a mixed RGB write on `session`, keeping its previous state in the new file `backup`, read
+/// back before anything is written. The session is ended whatever the outcome.
+fn write_mixed_state<Plan>(
+    session: Session,
+    verified: &WriteVerified,
+    backup: &Path,
+    capture: impl FnOnce(&mut MixedReader<'_, '_, Session>) -> Result<(MixedBackup, Plan), SessionError>,
+    write: impl FnOnce(&mut MixedRgb<'_, Session>, &MixedBackup, Plan) -> Result<(), SessionError>,
+) -> Result<(), SessionError> {
+    let mut keychron = Keychron::new(session);
+    let result = write_mixed(
+        &mut keychron,
+        verified,
+        capture,
+        |previous| backup_file::save_new_verified(backup, "mixed RGB", previous),
+        write,
+    )
+    .map(drop)
+    .map_err(GuardedWriteError::into_error);
+    keychron.into_transport().complete(result)
 }
 
 fn backup_device(device: &KeychronDevice) -> BackupDevice {
@@ -642,7 +681,7 @@ const fn v5_max_matrix() -> MatrixSize {
 
 /// The firmware build a backup records. A write is refused when the keyboard does not report it,
 /// because its backup could not say which effects its effect numbers mean.
-fn read_firmware(reader: &mut MixedReader<'_, '_>) -> Result<FirmwareBuild, SessionError> {
+fn read_firmware(reader: &mut MixedReader<'_, '_, Session>) -> Result<FirmwareBuild, SessionError> {
     reader
         .firmware_version()?
         .map(FirmwareBuild::from)
@@ -657,7 +696,7 @@ fn read_firmware(reader: &mut MixedReader<'_, '_>) -> Result<FirmwareBuild, Sess
 
 /// Every LED's region and every region's effect list, taken on `firmware`.
 fn capture(
-    reader: &mut MixedReader<'_, '_>,
+    reader: &mut MixedReader<'_, '_, Session>,
     device: BackupDevice,
     firmware: FirmwareBuild,
 ) -> Result<MixedBackup, SessionError> {
@@ -685,7 +724,7 @@ fn capture(
 
 /// The LED under each key, one `A8 06` request per row.
 fn leds_under(
-    reader: &mut MixedReader<'_, '_>,
+    reader: &mut MixedReader<'_, '_, Session>,
     keys: &[KeyPosition],
 ) -> Result<Vec<u8>, SessionError> {
     let rows = keys.iter().map(|key| key.row).collect::<BTreeSet<_>>();
