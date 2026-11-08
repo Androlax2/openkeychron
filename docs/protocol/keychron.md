@@ -125,6 +125,54 @@ Sub-commands from the enum in `common/rgb/keychron_rgb.c`. The V5 Max has
 | `0x0E` | Get effect list | `[2]` = region, `[3]` = start, `[4]` = count (≤ 3) | 8 bytes per effect: effect, H, S, speed, time (LE u32) | — |
 | `0x0F` | Set effect list | `[2]` = region, `[3]` = start, `[4]` = count (≤ 3), then 8 bytes per effect | status | RAM until `0x02` |
 
+### Per-key RGB
+
+From `common/rgb/keychron_rgb.c`, `common/rgb/per_key_rgb.c` and `common/rgb/rgb_matrix_kb.inc`.
+Implemented in `crates/openkeychron-keychron/src/perkey.rs` (#29); `openkeychron rgb key` uses it.
+
+- **Support check.** `0xA8` is compiled only with `KEYCHRON_RGB_ENABLE`, which also sets feature
+  bit 7 of `0xA2`. openkeychron checks that bit, then `A8 01` = `0x0001`, before sending anything
+  else, and reports "per-key RGB (Keychron firmware 1.1.0 or later)" as unsupported otherwise.
+  A firmware that does not answer `0xA2` at all is reported the same way.
+- **Colours are HSV.** `per_key_led[]` holds H, S, V per LED, but every per-key effect (solid,
+  breathing, three reactive) replaces V with the global RGB brightness. `rgb key` keeps the
+  stored V and changes only H and S.
+- **They show only in the per-key effect.** `PER_KEY_RGB` is a custom RGB matrix effect; its
+  VIA effect number depends on which effects the build enables, so it is not hard-coded.
+- **One save for everything.** `A8 02` writes indicators, per-key type and colours, mixed regions
+  and effects together, including changes another program left unsaved in RAM.
+- **LED lookup.** `A8 06` maps a matrix position to the *first* LED under it
+  (`rgb_matrix_map_row_column_to_led`), or `0xFF`. It fills reply bytes only for the
+  firmware's own `MATRIX_COLS`: the other bytes keep the request's content, so a column outside
+  the matrix would read as LED 0. openkeychron refuses positions outside the layout's matrix.
+
+### Mixed RGB
+
+From `common/rgb/keychron_rgb.c`, `common/rgb/mixed_rgb.c` and `common/rgb/keychron_rgb_type.h`.
+Implemented in `crates/openkeychron-keychron/src/mixed.rs` (#83); `openkeychron rgb mixed` uses it.
+
+- **Regions and effect lists.** Every LED belongs to a region (`regions[]`, one byte per LED).
+  Each region has its own list of `EFFECTS_PER_LAYER` slots and plays them in turn, so the
+  keyboard shows one effect per region at a time. The firmware calls regions "layers"; they are
+  not keymap layers. `A8 0B` reports how many there are; openkeychron reads it instead of
+  assuming the V5 Max's 2 × 5, and refuses a keyboard that reports 0 of either.
+- **An effect slot** is 8 bytes (`effect_config_t`): the RGB matrix effect number, H, S, speed,
+  then how long it plays in milliseconds (little-endian u32, compared with `timer_elapsed32`).
+  Effect `0` is an empty slot: the firmware skips it. `A8 0F` refuses an effect number from
+  `RGB_MATRIX_CUSTOM_MIXED_RGB` up, so a region cannot nest mixed RGB; the number itself depends
+  on the build, so openkeychron leaves that check to the firmware and reports the refusal.
+- **Bounds the firmware checks.** `A8 0C`/`0D` check `start + count` against the LED count, and
+  `A8 0D` refuses a region number ≥ `EFFECT_LAYERS`. `A8 0E`/`0F` check `start + count` against
+  the slots, but not the region (see "Firmware bugs" below). openkeychron checks all of them
+  before sending.
+- **They show only in the mixed effect.** `MIXED_RGB` is a custom RGB matrix effect, like
+  `PER_KEY_RGB`, and its VIA effect number depends on the build. `A8 0D` writes both `regions[]`
+  and `rgb_regions[]`, the copy `mixed_rgb()` loads when the effect starts; an effect list change
+  restarts every region's cycle (`update_mixed_rgb_effect_count`).
+- **Defaults** (`eeconfig_reset_custom_rgb`): region 0 plays effect 5, region 1 effect 2 (hue 0),
+  both saturation 255, speed 127, 5000 ms; the region map comes from the board's
+  `default_region[]`.
+
 The plain RGB effect, brightness, speed and colour are **not** Keychron commands: they are VIA's
 lighting values (`id_custom_get_value` / `id_custom_set_value` on channel
 `id_qmk_rgb_matrix_channel`, `quantum/via.h` at the repository root). #28 implements them in

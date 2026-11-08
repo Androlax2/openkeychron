@@ -34,6 +34,22 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         if: matrix.target != 'fmt'
+      # The Tauri app (app/src-tauri) links WebKitGTK on Linux.
+      - name: Install WebKitGTK
+        if: matrix.target != 'fmt'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev
+      # fmt and clippy also run Biome and svelte-check on app/; same Node and pnpm as local.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        if: matrix.target == 'fmt' || matrix.target == 'clippy'
+        with:
+          package_json_file: app/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: matrix.target == 'fmt' || matrix.target == 'clippy'
+        with:
+          node-version: 26.13.0
+      - name: Install app dependencies
+        if: matrix.target == 'fmt' || matrix.target == 'clippy'
+        run: pnpm --dir app install --frozen-lockfile
       - run: make ${{ matrix.target }}
 
   tools:
