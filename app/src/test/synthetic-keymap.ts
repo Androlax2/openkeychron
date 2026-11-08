@@ -1,5 +1,5 @@
 // Test data only.
-import type { Bounds, Key, Keymap } from "../lib/bindings";
+import type { Bounds, EditableKeymap, Key, Keymap } from "../lib/bindings";
 
 // A hand-written, cut-down V5 Max FR ISO keymap: two rows of real positions, the ISO Enter,
 // the 1u Num Lock and two unused matrix slots. Bounds come from the V5 Max ISO layout in openkeychron-via.
@@ -113,3 +113,34 @@ export const KEYMAP: Keymap = {
     { index: 1, keys: assign(FUNCTION_LAYER) },
   ],
 };
+
+/** KEYMAP as `read_keymap` returns it before the app changed anything. */
+export const EDITABLE_KEYMAP: EditableKeymap = {
+  keymap: KEYMAP,
+  undoSteps: 0,
+  canRestoreBackup: false,
+};
+
+/** `keymap` with the key at `row`, `column` on layer `layer` given `keycode` and `name`. */
+export function withKeycode(
+  keymap: Keymap,
+  position: { layer: number; row: number; column: number },
+  keycode: number,
+  name: string | null,
+): Keymap {
+  return {
+    ...keymap,
+    layers: keymap.layers.map((layer) =>
+      layer.index !== position.layer
+        ? layer
+        : {
+            ...layer,
+            keys: layer.keys.map((key) =>
+              key.row === position.row && key.column === position.column
+                ? { ...key, keycode, name }
+                : key,
+            ),
+          },
+    ),
+  };
+}
