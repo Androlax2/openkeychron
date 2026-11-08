@@ -2,14 +2,17 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, describe, expect, it } from "vitest";
 import { KEYMAP } from "../test/synthetic-keymap";
 import type { Keymap } from "./bindings";
-import Keyboard, { KEY_UNIT } from "./Keyboard.svelte";
+import Keyboard, { KEY_UNIT, type KeySelection } from "./Keyboard.svelte";
 
 let mounted: Record<string, unknown> | null = null;
 
-function render(keymap: Keymap = KEYMAP): HTMLElement {
+function render(
+  keymap: Keymap = KEYMAP,
+  onselectionchange: (selection: KeySelection) => void = () => {},
+): HTMLElement {
   const target = document.createElement("div");
   document.body.append(target);
-  mounted = mount(Keyboard, { target, props: { keymap } });
+  mounted = mount(Keyboard, { target, props: { keymap, onselectionchange } });
   flushSync();
   return target;
 }
@@ -257,5 +260,35 @@ describe("Keyboard", () => {
     }
     click(secondLayer);
     expect(selectedLegends(view)).toEqual(["Z"]);
+  });
+
+  it("reports the selected key with the index of the layer it is shown on", () => {
+    const selections: KeySelection[] = [];
+    const view = render(KEYMAP, (selection) => selections.push(selection));
+    click(keyNamed(view, "Z"));
+    expect(selections).toEqual([{ layer: 0, row: 1, column: 1 }]);
+  });
+
+  it("reports the selected key again on the layer the user switches to", () => {
+    const selections: KeySelection[] = [];
+    const view = render(KEYMAP, (selection) => selections.push(selection));
+    click(keyNamed(view, "Z"));
+    const [, secondLayer] = layerTabs(view);
+    if (secondLayer === undefined) {
+      throw new Error("no second layer tab");
+    }
+    click(secondLayer);
+    expect(selections.at(-1)).toEqual({ layer: 1, row: 1, column: 1 });
+  });
+
+  it("reports no selection when the layer changes before a key is selected", () => {
+    const selections: KeySelection[] = [];
+    const view = render(KEYMAP, (selection) => selections.push(selection));
+    const [, secondLayer] = layerTabs(view);
+    if (secondLayer === undefined) {
+      throw new Error("no second layer tab");
+    }
+    click(secondLayer);
+    expect(selections).toEqual([]);
   });
 });

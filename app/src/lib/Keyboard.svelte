@@ -1,16 +1,27 @@
 <script lang="ts" module>
 /** Pixels per key unit: a standard 1u key is this wide in the SVG's coordinates. */
 export const KEY_UNIT = 60;
+
+/** A selected key on one layer: the layer's index and the key's matrix position. */
+export type KeySelection = { layer: number; row: number; column: number };
 </script>
 
 <script lang="ts">
 import type { Bounds, Key, Keymap } from "./bindings";
 import { arrowDirection, neighbour } from "./keyboard-navigation";
+import { describeKeycode, hex } from "./keycode-text";
 
 type PlacedKey = Key & { bounds: Bounds };
 type MatrixPosition = { row: number; column: number };
 
-let { keymap }: { keymap: Keymap } = $props();
+let {
+  keymap,
+  onselectionchange = () => {},
+}: {
+  keymap: Keymap;
+  /** Called when a key is selected, and again with the new layer when the layer changes. */
+  onselectionchange?: (selection: KeySelection) => void;
+} = $props();
 
 // The gap between neighbouring keycaps, taken off each side of a key's rectangle.
 const INSET = 3;
@@ -69,15 +80,6 @@ function capRectangles(key: PlacedKey): Bounds[] {
   }));
 }
 
-function hex(keycode: number): string {
-  return `0x${keycode.toString(16).padStart(4, "0")}`;
-}
-
-/** QMK's name with the raw value, or only the raw value of a keycode without a name. */
-function describeKeycode(key: Key): string {
-  return key.name === null ? hex(key.keycode) : `${key.name} (${hex(key.keycode)})`;
-}
-
 /** The keycap shows the name, or the raw value of a custom or unknown keycode. */
 function keycodeLabel(key: Key): string {
   return key.name ?? hex(key.keycode);
@@ -121,6 +123,19 @@ function accessibleName(key: Key): string {
 
 function select(key: PlacedKey): void {
   selected = { row: key.row, column: key.column };
+  reportSelection();
+}
+
+function showLayer(position: number): void {
+  layerPosition = position;
+  reportSelection();
+}
+
+function reportSelection(): void {
+  const layer = keymap.layers[layerPosition];
+  if (selected !== null && layer !== undefined) {
+    onselectionchange({ layer: layer.index, ...selected });
+  }
 }
 
 function onKeyKeydown(event: KeyboardEvent, key: PlacedKey): void {
@@ -150,7 +165,7 @@ function onTabKeydown(event: KeyboardEvent): void {
   }
   event.preventDefault();
   const count = keymap.layers.length;
-  layerPosition = (layerPosition + step + count) % count;
+  showLayer((layerPosition + step + count) % count);
   document.getElementById(`${id}-tab-${layerPosition}`)?.focus();
 }
 </script>
@@ -165,9 +180,7 @@ function onTabKeydown(event: KeyboardEvent): void {
         aria-selected={position === layerPosition}
         aria-controls="{id}-panel"
         tabindex={position === layerPosition ? 0 : -1}
-        onclick={() => {
-          layerPosition = position;
-        }}
+        onclick={() => showLayer(position)}
         onkeydown={onTabKeydown}
       >
         Layer {layer.index}

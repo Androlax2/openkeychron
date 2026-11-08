@@ -1,5 +1,6 @@
 //! The one error every command returns. The UI receives it as its message text.
 
+use openkeychron_guard::GuardError;
 use openkeychron_hid::{DiscoveryError, OpenError, TransportError};
 use openkeychron_keychron::KeychronError;
 use openkeychron_via::ViaError;
@@ -33,6 +34,30 @@ pub enum CommandError {
 
     #[error(transparent)]
     Keychron(#[from] KeychronError),
+
+    /// A write refused, or failed before anything was sent. Boxed, like the next variant,
+    /// because a `GuardError` is several times larger than every other variant.
+    #[error(transparent)]
+    Guard(Box<GuardError>),
+
+    /// A write failed after its backup was kept, so the keyboard may have changed.
+    #[error("{error}; the keyboard may have changed: {recovery}")]
+    WriteFailedAfterBackup {
+        error: Box<GuardError>,
+        recovery: &'static str,
+    },
+
+    #[error("nothing to undo: the app has not changed this keyboard's keymap since it started")]
+    NothingToUndo,
+
+    #[error("no keymap backup yet: the app keeps one when it first changes this keyboard's keymap")]
+    NoKeymapBackup,
+}
+
+impl From<GuardError> for CommandError {
+    fn from(error: GuardError) -> Self {
+        Self::Guard(Box::new(error))
+    }
 }
 
 impl CommandError {
