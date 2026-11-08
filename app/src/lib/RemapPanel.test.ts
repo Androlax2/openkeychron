@@ -281,4 +281,147 @@ describe("RemapPanel", () => {
     answer(EDITABLE_KEYMAP);
     expect([busy, status(view)]).toEqual([[true, true, true, true], "Undoing…"]);
   });
+
+  describe("building a keycode", () => {
+    function chooseKind(view: HTMLElement, kind: string): void {
+      const label = [...view.querySelectorAll("fieldset.kind label")].find(
+        (candidate) => candidate.textContent?.trim() === kind,
+      );
+      const radio = label?.querySelector<HTMLInputElement>('input[type="radio"]');
+      if (radio === null || radio === undefined) {
+        throw new Error(`no keycode kind ${kind}`);
+      }
+      radio.click();
+      flushSync();
+    }
+
+    function tick(view: HTMLElement, modifier: string): void {
+      const label = [...view.querySelectorAll("label")].find(
+        (candidate) => candidate.textContent?.trim() === modifier,
+      );
+      label?.querySelector("input")?.click();
+      flushSync();
+    }
+
+    function typeRaw(view: HTMLElement, text: string): void {
+      const input = view.querySelector<HTMLInputElement>(".raw input");
+      if (input === null) {
+        throw new Error("no raw keycode field");
+      }
+      input.value = text;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      flushSync();
+    }
+
+    function chosenText(view: HTMLElement): string | undefined {
+      return view.querySelector(".chosen")?.textContent?.trim();
+    }
+
+    it("offers each kind of keycode", () => {
+      const view = render();
+      expect(
+        [...view.querySelectorAll("fieldset.kind label")].map((label) => label.textContent?.trim()),
+      ).toEqual([
+        "Keycode",
+        "Modifiers + key",
+        "Mod-tap",
+        "Layer-tap",
+        "Layer + modifiers",
+        "Raw value",
+      ]);
+    });
+
+    it("names a built modifier combination before applying it", () => {
+      const view = render();
+      chooseKind(view, "Modifiers + key");
+      tick(view, "Ctrl");
+      choose(view, "C");
+      expect(chosenText(view)).toBe("New keycode: LCTL(C) (0x0106)");
+    });
+
+    it("applies a built modifier combination", async () => {
+      const calls: unknown[] = [];
+      mockIPC((command, payload) => {
+        calls.push([command, payload]);
+        return AFTER_ESC;
+      });
+      const view = render();
+      chooseKind(view, "Modifiers + key");
+      tick(view, "Ctrl");
+      choose(view, "C");
+      button(view, "Apply").click();
+      await vi.waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls).toEqual([
+        ["set_keycode", { path: PATH, assignment: { ...Z_KEY, keycode: 0x0106 } }],
+      ]);
+    });
+
+    it("names a built mod-tap by QMK's shorthand", () => {
+      const view = render();
+      chooseKind(view, "Mod-tap");
+      tick(view, "Shift");
+      choose(view, "A");
+      expect(chosenText(view)).toBe("New keycode: LSFT_T(A) (0x2204)");
+    });
+
+    it("cannot apply a combination still missing a part", () => {
+      const view = render();
+      chooseKind(view, "Modifiers + key");
+      choose(view, "C");
+      expect(button(view, "Apply").disabled).toBe(true);
+    });
+
+    it("forgets the chosen keycode when the kind changes", () => {
+      const view = render();
+      choose(view, "ESC");
+      chooseKind(view, "Raw value");
+      expect(chosenText(view)).toBe("New keycode: none chosen");
+    });
+
+    it("names a raw keycode before applying it", () => {
+      const view = render();
+      chooseKind(view, "Raw value");
+      typeRaw(view, "0x412c");
+      expect(chosenText(view)).toBe("New keycode: LT(1, SPC) (0x412c)");
+    });
+
+    it("shows a raw keycode QMK does not name by its value", () => {
+      const view = render();
+      chooseKind(view, "Raw value");
+      typeRaw(view, "7e05");
+      expect(chosenText(view)).toBe("New keycode: 0x7e05");
+    });
+
+    it("applies a raw keycode", async () => {
+      const calls: unknown[] = [];
+      mockIPC((command, payload) => {
+        calls.push([command, payload]);
+        return AFTER_ESC;
+      });
+      const view = render();
+      chooseKind(view, "Raw value");
+      typeRaw(view, "7e05");
+      button(view, "Apply").click();
+      await vi.waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls).toEqual([
+        ["set_keycode", { path: PATH, assignment: { ...Z_KEY, keycode: 0x7e05 } }],
+      ]);
+    });
+
+    it("says how to write a raw keycode it cannot read", () => {
+      const view = render();
+      chooseKind(view, "Raw value");
+      typeRaw(view, "0x12345");
+      expect(view.querySelector(".raw .invalid")?.textContent?.trim()).toBe(
+        "Enter one to four hexadecimal digits, such as 0x0106.",
+      );
+    });
+
+    it("cannot apply a raw keycode it cannot read", () => {
+      const view = render();
+      chooseKind(view, "Raw value");
+      typeRaw(view, "0x12345");
+      expect(button(view, "Apply").disabled).toBe(true);
+    });
+  });
 });

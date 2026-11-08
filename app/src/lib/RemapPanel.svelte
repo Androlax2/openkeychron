@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { EditableKeymap, Key } from "./bindings";
+import type { EditableKeymap, Key, WrapperBuilder } from "./bindings";
 import { KEYCODE_CATEGORIES } from "./bindings";
 import {
   readKeymap,
@@ -9,8 +9,10 @@ import {
   undoKeymapChange,
 } from "./commands";
 import type { KeySelection } from "./Keyboard.svelte";
+import KeycodeBuilder from "./KeycodeBuilder.svelte";
 import KeycodePicker from "./KeycodePicker.svelte";
-import { describeKeycode } from "./keycode-text";
+import { keycodeName } from "./keycode-build";
+import { describeKeycode, parseRawKeycode } from "./keycode-text";
 
 let {
   path,
@@ -27,9 +29,21 @@ let {
 } = $props();
 
 type Outcome = { failed: boolean; text: string };
+type KeycodeKind = "list" | WrapperBuilder | "raw";
+
+const KEYCODE_KINDS: { kind: KeycodeKind; label: string }[] = [
+  { kind: "list", label: "Keycode" },
+  { kind: "modified", label: "Modifiers + key" },
+  { kind: "modTap", label: "Mod-tap" },
+  { kind: "layerTap", label: "Layer-tap" },
+  { kind: "layerMod", label: "Layer + modifiers" },
+  { kind: "raw", label: "Raw value" },
+];
 
 const id = $props.id();
+let kind: KeycodeKind = $state("list");
 let chosen: number | null = $state(null);
+let rawText = $state("");
 /** What the write in progress is doing, such as "Applying…"; null when none is. */
 let pending: string | null = $state(null);
 let outcome: Outcome | null = $state(null);
@@ -40,11 +54,10 @@ const selectedKeyText = $derived(
     ? "No key selected."
     : `Layer ${selection.layer}, ${describeKey(selectedKey)}: ${describeKeycode(selectedKey)}`,
 );
-const chosenChoice = $derived(
-  KEYCODE_CATEGORIES.flatMap((category) => category.keycodes).find(
-    (choice) => choice.keycode === chosen,
-  ) ?? null,
+const chosenText = $derived(
+  chosen === null ? "none chosen" : describeKeycode({ keycode: chosen, name: keycodeName(chosen) }),
 );
+const isRawUnreadable = $derived(rawText.trim() !== "" && parseRawKeycode(rawText) === null);
 const applyHint = $derived(
   selectedKey === null
     ? "Select a key on the keyboard first."
@@ -54,6 +67,12 @@ const applyHint = $derived(
         ? "The key already has this keycode."
         : null,
 );
+
+function chooseKind(next: KeycodeKind): void {
+  kind = next;
+  chosen = null;
+  rawText = "";
+}
 
 function keyAt(keymap: EditableKeymap, at: KeySelection): Key | null {
   return (
@@ -140,17 +159,64 @@ function restoreBackup(): void {
 
   <p class="selected-key">{selectedKeyText}</p>
 
-  <KeycodePicker
-    layerCount={editable.keymap.layerCount}
-    {chosen}
-    onchoose={(keycode) => {
-      chosen = keycode;
-    }}
-  />
+  <fieldset class="kind">
+    <legend>Kind of keycode</legend>
+    {#each KEYCODE_KINDS as option (option.kind)}
+      <label>
+        <input
+          type="radio"
+          name="{id}-kind"
+          value={option.kind}
+          checked={option.kind === kind}
+          onchange={() => chooseKind(option.kind)}
+        >
+        {option.label}
+      </label>
+    {/each}
+  </fieldset>
 
-  <p class="chosen">
-    New keycode: {chosenChoice === null ? "none chosen" : describeKeycode(chosenChoice)}
-  </p>
+  {#if kind === "list"}
+    <KeycodePicker
+      categories={KEYCODE_CATEGORIES}
+      layerCount={editable.keymap.layerCount}
+      {chosen}
+      onchoose={(keycode) => {
+        chosen = keycode;
+      }}
+    />
+  {:else if kind === "raw"}
+    <div class="raw">
+      <label for="{id}-raw">Raw keycode, in hexadecimal</label>
+      <input
+        id="{id}-raw"
+        type="text"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="0x0106"
+        aria-invalid={isRawUnreadable}
+        aria-describedby={isRawUnreadable ? `${id}-raw-invalid` : undefined}
+        bind:value={rawText}
+        oninput={(event) => {
+          chosen = parseRawKeycode(event.currentTarget.value);
+        }}
+      >
+      {#if isRawUnreadable}
+        <p class="invalid" id="{id}-raw-invalid">
+          Enter one to four hexadecimal digits, such as 0x0106.
+        </p>
+      {/if}
+    </div>
+  {:else}
+    <KeycodeBuilder
+      builder={kind}
+      layerCount={editable.keymap.layerCount}
+      onbuild={(keycode) => {
+        chosen = keycode;
+      }}
+    />
+  {/if}
+
+  <p class="chosen">New keycode: {chosenText}</p>
 
   <div class="actions">
     <button
@@ -209,5 +275,10 @@ function restoreBackup(): void {
 .actions {
   display: flex;
   gap: 0.5rem;
+}
+
+.kind label {
+  margin-right: 0.75rem;
+  white-space: nowrap;
 }
 </style>

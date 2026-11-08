@@ -20,6 +20,86 @@ pub enum KeycodeKind {
     Raw(u16),
 }
 
+/// The part of a two-part keycode that wraps the other, as QMK's macros build them. Modifier
+/// fields use the same five-bit encoding as [`KeycodeKind`]; layers go from 0 to 15.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeycodeWrapper {
+    /// `LCTL(…)`: these modifiers held with a basic keycode.
+    Modified(u8),
+    /// `LCTL_T(…)` or `MT(…)`: these modifiers when held, a basic keycode when tapped.
+    ModTap(u8),
+    /// `LT(1, …)`: this layer when held, a basic keycode when tapped.
+    LayerTap(u8),
+    /// `LM(1, …)`: this layer with a modifier field active.
+    LayerMod(u8),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum KeycodeError {
+    #[error(
+        "modifier field {0:#04x} holds no modifier: expected one or more of Ctrl (0x01), \
+         Shift (0x02), Alt (0x04) and GUI (0x08), plus 0x10 for the right-hand ones"
+    )]
+    InvalidModifiers(u8),
+    #[error("layer {0} does not fit a two-part keycode: it holds layers 0 to 15")]
+    LayerOutOfRange(u8),
+}
+
+// Range starts from `quantum/keycodes.h`; each wrapper's shifts from its macro in
+// `quantum/quantum_keycodes.h`: `MT`, `LT` and `LM`, and `LCTL(kc)` as `QK_LCTL | kc`, where
+// `QK_LCTL` to `QK_LGUI` are 0x0100 to 0x0800 and `QK_RMODS_MIN` is 0x1000.
+const QK_MOD_TAP: u16 = 0x2000;
+const QK_LAYER_TAP: u16 = 0x4000;
+const QK_LAYER_MOD: u16 = 0x5000;
+const LAST_WRAPPED_LAYER: u8 = 15;
+/// `MOD_LCTL` to `MOD_LGUI` in `quantum/modifiers.h`; bit 4 only picks the hand.
+const CTRL_SHIFT_ALT_GUI: u8 = 0x0f;
+
+impl KeycodeWrapper {
+    /// The keycode with `inner` wrapped: a basic keycode, or for [`Self::LayerMod`] a modifier
+    /// field.
+    ///
+    /// # Errors
+    ///
+    /// When the wrapper or, for [`Self::LayerMod`], `inner` holds no modifier, or its layer is
+    /// past 15.
+    pub fn wrap(self, inner: u8) -> Result<Keycode, KeycodeError> {
+        if let Self::LayerMod(_) = self {
+            check_modifiers(inner)?;
+        }
+        Ok(Keycode(self.bits()? | u16::from(inner)))
+    }
+
+    /// The bits this wrapper sets in every keycode it builds: the inner part fills the bits
+    /// below them, so a wrapped keycode is `bits | inner`.
+    ///
+    /// # Errors
+    ///
+    /// When the wrapper holds no modifier, or its layer is past 15.
+    pub fn bits(self) -> Result<u16, KeycodeError> {
+        Ok(match self {
+            Self::Modified(modifiers) => u16::from(check_modifiers(modifiers)?) << 8,
+            Self::ModTap(modifiers) => QK_MOD_TAP | u16::from(check_modifiers(modifiers)?) << 8,
+            Self::LayerTap(layer) => QK_LAYER_TAP | u16::from(check_layer(layer)?) << 8,
+            Self::LayerMod(layer) => QK_LAYER_MOD | u16::from(check_layer(layer)?) << 5,
+        })
+    }
+}
+
+pub(crate) fn check_modifiers(modifiers: u8) -> Result<u8, KeycodeError> {
+    if modifiers > 0x1f || modifiers & CTRL_SHIFT_ALT_GUI == 0 {
+        return Err(KeycodeError::InvalidModifiers(modifiers));
+    }
+    Ok(modifiers)
+}
+
+fn check_layer(layer: u8) -> Result<u8, KeycodeError> {
+    if layer > LAST_WRAPPED_LAYER {
+        return Err(KeycodeError::LayerOutOfRange(layer));
+    }
+    Ok(layer)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayerAction {
     To,
