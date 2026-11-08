@@ -3,13 +3,10 @@
 mod backup_file;
 mod guarded_write;
 mod keymap;
-mod keymap_backup;
 mod keymap_edit;
-mod macro_backup;
 mod macros;
 mod mixed_rgb;
 mod rgb;
-mod rgb_guarded_write;
 mod session;
 mod settings;
 

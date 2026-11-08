@@ -10,6 +10,7 @@ publish = false
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+openkeychron-guard = { path = "../openkeychron-guard", version = "0.0.0" }
 openkeychron-hid.workspace = true
 openkeychron-keychron = { path = "../openkeychron-keychron", version = "0.0.0" }
 openkeychron-via = { path = "../openkeychron-via", version = "0.0.0" }

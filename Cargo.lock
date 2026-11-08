@@ -2245,11 +2245,24 @@ name = "openkeychron-cli"
 version = "0.0.0"
 dependencies = [
  "clap",
+ "openkeychron-guard",
  "openkeychron-hid",
  "openkeychron-keychron",
  "openkeychron-via",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "openkeychron-guard"
+version = "0.0.0"
+dependencies = [
+ "openkeychron-hid",
+ "openkeychron-keychron",
+ "openkeychron-via",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

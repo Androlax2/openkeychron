@@ -4,13 +4,15 @@
 use std::path::{Path, PathBuf};
 
 use clap::{Subcommand, ValueEnum};
+use openkeychron_guard::settings::{SettingsReader, write_settings};
+use openkeychron_guard::{GuardedWriteError, WriteVerified, require_write_verified};
 use openkeychron_keychron::{
     Debounce, DebounceAlgorithm, Keychron, SnapClickMode, SnapClickPair, WirelessTimers,
 };
 use serde::Serialize;
 
+use crate::backup_file;
 use crate::session::{Session, SessionError};
-use crate::{backup_file, guarded_write};
 
 #[derive(Debug, Subcommand)]
 pub enum SettingsAction {
@@ -131,13 +133,18 @@ pub fn run(
         ));
     }
     let session = Session::start(fixture, record, device)?;
-    if matches!(action, SettingsAction::Set { .. }) {
-        guarded_write::require_write_verified("settings writes", session.device())?;
-    }
+    let verified = match action {
+        SettingsAction::Get => None,
+        SettingsAction::Set { .. } => {
+            Some(require_write_verified("settings writes", session.device())?)
+        }
+    };
     let mut keychron = Keychron::new(session);
-    let result = match action {
-        SettingsAction::Get => get(&mut keychron, json),
-        SettingsAction::Set { backup, setting } => set(&mut keychron, backup, setting),
+    let result = match (action, &verified) {
+        (SettingsAction::Set { backup, setting }, Some(verified)) => {
+            set(&mut keychron, verified, backup, setting)
+        }
+        _ => get(&mut keychron, json),
     };
     result?;
     keychron.into_transport().finish()
@@ -184,99 +191,140 @@ fn get(keychron: &mut Keychron<Session>, json: bool) -> Result<(), SessionError>
     Ok(())
 }
 
+/// Saves the previous value to the new file `backup`, then writes. A failure returns before the
+/// session is finished, as `settings set` always has.
 fn set(
     keychron: &mut Keychron<Session>,
+    verified: &WriteVerified,
     backup: &Path,
     setting: &Setting,
 ) -> Result<(), SessionError> {
     match *setting {
-        Setting::Debounce { algorithm, time_ms } => {
-            let previous = debounce_output(keychron.debounce()?);
-            let restore = format!(
-                "openkeychron settings set --backup <NEW_FILE> debounce {} {}",
-                name(&previous.algorithm),
-                previous.time_ms
-            );
-            backup_file::save_new(backup, "settings", &Backup::Debounce(previous))?;
-            keychron.set_debounce(Debounce {
-                algorithm: library_algorithm(algorithm),
-                time_ms,
-            })?;
-            println!("Debounce set to {time_ms} ms, {}.", name(&algorithm));
-            println!(
-                "Previous value saved to {}. Restore with:\n  {restore}",
-                backup.display()
-            );
-        }
+        Setting::Debounce { algorithm, time_ms } => write_setting(
+            keychron,
+            verified,
+            backup,
+            |reader| {
+                let previous = debounce_output(reader.debounce()?);
+                let restore = format!(
+                    "openkeychron settings set --backup <NEW_FILE> debounce {} {}",
+                    name(&previous.algorithm),
+                    previous.time_ms
+                );
+                Ok((Backup::Debounce(previous), restore))
+            },
+            |keychron| {
+                keychron.set_debounce(Debounce {
+                    algorithm: library_algorithm(algorithm),
+                    time_ms,
+                })?;
+                println!("Debounce set to {time_ms} ms, {}.", name(&algorithm));
+                Ok(())
+            },
+        ),
         Setting::SnapClick {
             index,
             mode,
             first_key,
             second_key,
             save,
-        } => {
-            let pairs = keychron.snap_click_pairs()?;
-            let previous = pairs.get(usize::from(index)).copied().ok_or_else(|| {
-                SessionError::Usage(format!(
-                    "Snap Click pair {index} does not exist; this keyboard has {}",
-                    pairs.len()
-                ))
-            })?;
-            let previous = pair_output(index, previous);
-            let restore = format!(
-                "openkeychron settings set --backup <NEW_FILE> snap-click {index} {} 0x{:02x} 0x{:02x}{}",
-                name(&previous.mode),
-                previous.keys[0],
-                previous.keys[1],
-                if save { " --save" } else { "" }
-            );
-            backup_file::save_new(backup, "settings", &Backup::SnapClick(previous))?;
-            keychron.set_snap_click_pair(
-                index,
-                SnapClickPair {
-                    mode: library_mode(mode),
-                    keys: [first_key, second_key],
-                },
-            )?;
-            if save {
-                keychron.save_snap_click()?;
-            }
-            let kept = if save {
-                "saved"
-            } else {
-                "kept until power-off (not saved)"
-            };
-            println!("Snap Click pair {index} set to {}, {kept}.", name(&mode));
-            println!(
-                "Previous value saved to {}. Restore with:\n  {restore}",
-                backup.display()
-            );
-        }
+        } => write_setting(
+            keychron,
+            verified,
+            backup,
+            |reader| {
+                let pairs = reader.snap_click_pairs()?;
+                let previous = pairs.get(usize::from(index)).copied().ok_or_else(|| {
+                    SessionError::Usage(format!(
+                        "Snap Click pair {index} does not exist; this keyboard has {}",
+                        pairs.len()
+                    ))
+                })?;
+                let previous = pair_output(index, previous);
+                let restore = format!(
+                    "openkeychron settings set --backup <NEW_FILE> snap-click {index} {} 0x{:02x} 0x{:02x}{}",
+                    name(&previous.mode),
+                    previous.keys[0],
+                    previous.keys[1],
+                    if save { " --save" } else { "" }
+                );
+                Ok((Backup::SnapClick(previous), restore))
+            },
+            |keychron| {
+                keychron.set_snap_click_pair(
+                    index,
+                    SnapClickPair {
+                        mode: library_mode(mode),
+                        keys: [first_key, second_key],
+                    },
+                )?;
+                if save {
+                    keychron.save_snap_click()?;
+                }
+                let kept = if save {
+                    "saved"
+                } else {
+                    "kept until power-off (not saved)"
+                };
+                println!("Snap Click pair {index} set to {}, {kept}.", name(&mode));
+                Ok(())
+            },
+        ),
         Setting::Wireless {
             backlight_off_seconds,
             sleep_seconds,
-        } => {
-            let previous = wireless_output(keychron.wireless_timers()?);
-            let restore = format!(
-                "openkeychron settings set --backup <NEW_FILE> wireless {} {}",
-                previous.backlight_off_seconds, previous.sleep_seconds
-            );
-            backup_file::save_new(backup, "settings", &Backup::Wireless(previous))?;
-            keychron.set_wireless_timers(WirelessTimers {
-                backlight_off_seconds,
-                sleep_seconds,
-            })?;
-            println!(
-                "Wireless: backlight off after {backlight_off_seconds} s, sleep after \
-                 {sleep_seconds} s."
-            );
+        } => write_setting(
+            keychron,
+            verified,
+            backup,
+            |reader| {
+                let previous = wireless_output(reader.wireless_timers()?);
+                let restore = format!(
+                    "openkeychron settings set --backup <NEW_FILE> wireless {} {}",
+                    previous.backlight_off_seconds, previous.sleep_seconds
+                );
+                Ok((Backup::Wireless(previous), restore))
+            },
+            |keychron| {
+                keychron.set_wireless_timers(WirelessTimers {
+                    backlight_off_seconds,
+                    sleep_seconds,
+                })?;
+                println!(
+                    "Wireless: backlight off after {backlight_off_seconds} s, sleep after \
+                     {sleep_seconds} s."
+                );
+                Ok(())
+            },
+        ),
+    }
+}
+
+/// Saves the previous value `capture` reads to the new file `backup`, then runs `write` and prints
+/// the restore command `capture` returned with it.
+fn write_setting(
+    keychron: &mut Keychron<Session>,
+    verified: &WriteVerified,
+    backup: &Path,
+    capture: impl FnOnce(&mut SettingsReader<'_, Session>) -> Result<(Backup, String), SessionError>,
+    write: impl FnOnce(&mut Keychron<Session>) -> Result<(), SessionError>,
+) -> Result<(), SessionError> {
+    write_settings(
+        keychron,
+        verified,
+        capture,
+        |previous| backup_file::save_new(backup, "settings", previous),
+        |keychron, _, restore| {
+            write(keychron)?;
             println!(
                 "Previous value saved to {}. Restore with:\n  {restore}",
                 backup.display()
             );
-        }
-    }
-    Ok(())
+            Ok(())
+        },
+    )
+    .map(drop)
+    .map_err(GuardedWriteError::into_error)
 }
 
 fn name(value: &impl ValueEnum) -> String {
