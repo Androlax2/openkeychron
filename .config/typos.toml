@@ -1,3 +1,9 @@
 [files]
 # Recorded HID traffic is hex, not prose.
 extend-exclude = ["fixtures/**"]
+
+# QMK keycode aliases that crates/openkeychron-via/src/keycode_name.rs shows as QMK spells
+# them: KC_AGIN is KC_AGAIN and KC_SLEP is KC_SYSTEM_SLEEP in quantum/keycodes.h.
+[default.extend-words]
+AGIN = "AGIN"
+SLEP = "SLEP"
