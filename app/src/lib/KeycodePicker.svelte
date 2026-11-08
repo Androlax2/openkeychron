@@ -17,15 +17,22 @@ const id = $props.id();
 let search = $state("");
 
 const shownCategories = $derived(matchingCategories(KEYCODE_CATEGORIES, search, layerCount));
+const matchCount = $derived(
+  shownCategories.reduce((count, category) => count + category.keycodes.length, 0),
+);
 </script>
 
 <div class="keycode-picker">
   <label for="{id}-search">Search keycodes</label>
   <input id="{id}-search" type="search" autocomplete="off" spellcheck="false" bind:value={search}>
 
-  {#if shownCategories.length === 0}
-    <p class="no-match">No keycode matches “{search}”.</p>
-  {:else}
+  <p class="match-count" aria-live="polite">
+    {matchCount === 0
+      ? `No keycode matches “${search}”.`
+      : `${matchCount} ${matchCount === 1 ? "keycode matches" : "keycodes match"}.`}
+  </p>
+
+  {#if matchCount > 0}
     <div class="categories">
       {#each shownCategories as category (category.name)}
         <fieldset>

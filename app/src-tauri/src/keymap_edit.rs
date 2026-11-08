@@ -50,12 +50,40 @@ pub struct KeymapHistory {
     /// The keymap from before each change Undo can take back, oldest first. A restore's backup
     /// goes here too, so Undo takes a restore back.
     undo: Vec<KeymapBackup>,
-    /// The keymap each undo replaced. Nothing offers it yet (redo is a follow-up); it is kept
-    /// because every write keeps what it replaces before it is sent (`protocol.md`).
+    /// The keymap each undo replaced, oldest first. Nothing offers it yet (redo is #148); it is
+    /// kept because every write keeps what it replaces before it is sent (`protocol.md`).
     undone: Vec<KeymapBackup>,
+    /// The keymap the app's last write left the keyboard with, as its read-back verified. `None`
+    /// before any write, and after a write that failed part-way left the keymap unknown: Undo
+    /// then writes without comparing, since writing the keymap back is how to recover.
+    left_as: Option<KeymapBackup>,
 }
 
 impl KeymapHistory {
+    /// Notes what a guarded write left the keyboard with: `expected`, given the keymap the write
+    /// replaced, once it read back; unknown once it failed after its backup.
+    fn note<E: Into<CommandError>>(
+        &mut self,
+        outcome: Result<KeymapBackup, GuardedWriteError<KeymapBackup, E>>,
+        expected: impl FnOnce(&KeymapBackup) -> KeymapBackup,
+        recovery: &'static str,
+    ) -> Result<(), CommandError> {
+        match outcome {
+            Ok(replaced) => {
+                self.left_as = Some(expected(&replaced));
+                Ok(())
+            }
+            Err(GuardedWriteError::NothingWritten(error)) => Err(error.into()),
+            Err(GuardedWriteError::AfterBackup { error, .. }) => {
+                self.left_as = None;
+                Err(CommandError::WriteFailedAfterBackup {
+                    error: Box::new(error.into()),
+                    recovery,
+                })
+            }
+        }
+    }
+
     fn with(&self, keymap: Keymap) -> EditableKeymap {
         EditableKeymap {
             keymap,
@@ -71,8 +99,8 @@ pub struct KeymapHistories(Mutex<HashMap<String, KeymapHistory>>);
 
 impl KeymapHistories {
     pub fn lock(&self) -> MutexGuard<'_, HashMap<String, KeymapHistory>> {
-        // Each change to a history is one push or pop, so a command that panicked while holding
-        // the lock left no history half-changed.
+        // A history changes only through whole-value pushes, pops and assignments, so a command
+        // that panicked while holding the lock left every backup in it complete.
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -96,7 +124,7 @@ pub fn set_keycode<T: HidTransport>(
     let verified = require_write_verified(WRITES, device)?;
     let key = KeyPosition::new(assignment.row, assignment.column)?;
     let mut via = Via::new(transport);
-    guarded_keymap::set_keycode::<_, GuardError>(
+    let outcome = guarded_keymap::set_keycode::<_, GuardError>(
         &mut via,
         &verified,
         assignment.layer,
@@ -107,12 +135,18 @@ pub fn set_keycode<T: HidTransport>(
             history.undo.push(previous.clone());
             Ok(())
         },
-    )
-    .map_err(|error| failed(error, "Undo puts back the keymap from before this change"))?;
+    );
+    history.note(
+        outcome,
+        |previous| with_assignment(previous, assignment),
+        "Undo puts back the keymap from before this change",
+    )?;
     read(via.into_transport(), device, history)
 }
 
-/// Writes back the keymap from before the newest change Undo can take back.
+/// Writes back the keymap from before the newest change Undo can take back. Refused, before
+/// anything is sent, when the keymap is not as the app's last write left it: changes made with
+/// another program since then would be taken back too.
 pub fn undo<T: HidTransport>(
     transport: T,
     device: &KeychronDevice,
@@ -125,11 +159,19 @@ pub fn undo<T: HidTransport>(
         .cloned()
         .ok_or(CommandError::NothingToUndo)?;
     let mut via = Via::new(transport);
-    guarded_keymap::restore::<_, GuardError>(&mut via, &verified, &previous, |replaced| {
-        history.undone.push(replaced.clone());
-        Ok(())
-    })
-    .map_err(|error| failed(error, "Undo again to retry"))?;
+    let outcome =
+        guarded_keymap::restore::<_, CommandError>(&mut via, &verified, &previous, |replaced| {
+            if history
+                .left_as
+                .as_ref()
+                .is_some_and(|left_as| left_as != replaced)
+            {
+                return Err(CommandError::KeymapChangedOutsideApp);
+            }
+            history.undone.push(replaced.clone());
+            Ok(())
+        });
+    history.note(outcome, |_| previous.clone(), "Undo again to retry")?;
     history.undo.pop();
     read(via.into_transport(), device, history)
 }
@@ -146,32 +188,29 @@ pub fn restore_backup<T: HidTransport>(
         .clone()
         .ok_or(CommandError::NoKeymapBackup)?;
     let mut via = Via::new(transport);
-    guarded_keymap::restore::<_, GuardError>(&mut via, &verified, &backup, |replaced| {
-        history.undo.push(replaced.clone());
-        Ok(())
-    })
-    .map_err(|error| {
-        failed(
-            error,
-            "Undo puts back the keymap from before the restore, and Restore backup tries again",
-        )
-    })?;
+    let outcome =
+        guarded_keymap::restore::<_, GuardError>(&mut via, &verified, &backup, |replaced| {
+            history.undo.push(replaced.clone());
+            Ok(())
+        });
+    history.note(
+        outcome,
+        |_| backup.clone(),
+        "Undo puts back the keymap from before the restore, and Restore backup tries again",
+    )?;
     read(via.into_transport(), device, history)
 }
 
-/// A failed guarded write. Once the backup is kept, the keyboard may have changed, so the
-/// message says how to get back.
-fn failed(
-    error: GuardedWriteError<KeymapBackup, GuardError>,
-    recovery: &'static str,
-) -> CommandError {
-    match error {
-        GuardedWriteError::NothingWritten(error) => error.into(),
-        GuardedWriteError::AfterBackup { error, .. } => CommandError::WriteFailedAfterBackup {
-            error: Box::new(error),
-            recovery,
-        },
-    }
+/// The keymap `guarded_keymap::set_keycode` requires the keyboard to read back: `previous`
+/// with the one key changed. The guard checked the layer and the key before writing.
+fn with_assignment(previous: &KeymapBackup, assignment: KeyAssignment) -> KeymapBackup {
+    let mut expected = previous.clone();
+    let slot = (usize::from(assignment.layer) * usize::from(expected.rows)
+        + usize::from(assignment.row))
+        * usize::from(expected.columns)
+        + usize::from(assignment.column);
+    expected.matrix[slot] = assignment.keycode;
+    expected
 }
 
 #[cfg(test)]
@@ -259,7 +298,7 @@ mod tests {
     }
 
     #[test]
-    fn a_change_can_be_undone_and_the_first_backup_restored() {
+    fn a_change_offers_one_undo_step_and_the_backup() {
         let mut mock = Mock::new();
         let edited = mock.set(0, KC_A);
         assert_eq!((edited.undo_steps, edited.can_restore_backup), (1, true));
@@ -297,7 +336,8 @@ mod tests {
         let error = undo(mock.keyboard.connect(), &mock.device, &mut mock.history).unwrap_err();
         assert_eq!(
             error.to_string(),
-            "nothing to undo: the app has not changed this keyboard's keymap since it started"
+            "nothing left to undo: Undo takes back only the keymap changes the app made since it \
+             started"
         );
     }
 
@@ -355,47 +395,156 @@ mod tests {
         );
     }
 
-    #[test]
-    fn refuses_a_layer_the_keyboard_does_not_have_and_keeps_no_backup() {
-        let mut mock = Mock::new();
-        let error = set_keycode(
+    fn set_on_layer_four(mock: &mut Mock) -> CommandError {
+        set_keycode(
             mock.keyboard.connect(),
             &mock.device,
             &mut mock.history,
             assignment(4, KC_A),
         )
-        .unwrap_err();
+        .unwrap_err()
+    }
+
+    #[test]
+    fn refuses_a_layer_the_keyboard_does_not_have() {
+        let error = set_on_layer_four(&mut Mock::new());
+        assert_eq!(error.to_string(), "layer 4 is unavailable; select 0..=3");
+    }
+
+    #[test]
+    fn a_refused_write_offers_no_undo() {
+        let mut mock = Mock::new();
+        set_on_layer_four(&mut mock);
+        assert_eq!(mock.read().undo_steps, 0);
+    }
+
+    /// Sets the key as another program would: on the same keyboard, outside the app's history.
+    fn set_outside_the_app(mock: &Mock, keycode: u16) {
+        set_keycode(
+            mock.keyboard.connect(),
+            &mock.device,
+            &mut KeymapHistory::default(),
+            assignment(0, keycode),
+        )
+        .unwrap();
+    }
+
+    fn undo_after_a_change_outside_the_app(mock: &mut Mock) -> CommandError {
+        mock.set(0, KC_A);
+        set_outside_the_app(mock, KC_C);
+        undo(mock.keyboard.connect(), &mock.device, &mut mock.history).unwrap_err()
+    }
+
+    #[test]
+    fn undo_refuses_to_write_over_a_keymap_changed_outside_the_app() {
+        let error = undo_after_a_change_outside_the_app(&mut Mock::new());
         assert_eq!(
-            (error.to_string(), mock.read().undo_steps),
-            ("layer 4 is unavailable; select 0..=3".to_owned(), 0)
+            error.to_string(),
+            "the keymap is not as the app left it, so Undo would also take back changes made \
+             outside the app; nothing was written. Restore backup still puts back the keymap \
+             from before the app's first change"
         );
     }
 
-    /// The VIA request that sets one keycode: `id_dynamic_keymap_set_keycode = 0x05` in QMK's
-    /// `quantum/via.h` (see `openkeychron-via`).
+    #[test]
+    fn a_refused_undo_leaves_the_keyboard_and_the_undo_step_as_they_were() {
+        let mut mock = Mock::new();
+        undo_after_a_change_outside_the_app(&mut mock);
+        let keymap = mock.read();
+        assert_eq!((keycode_at(&keymap, 0), keymap.undo_steps), (KC_C, 1));
+    }
+
+    /// QMK's `quantum/via.h` request IDs, as `openkeychron-via` sends them:
+    /// `id_dynamic_keymap_set_keycode = 0x05` sets one key, and
+    /// `id_dynamic_keymap_set_buffer = 0x13` writes the keymap a restore sends.
     const SET_KEYCODE_REQUEST: u8 = 0x05;
+    const SET_KEYMAP_BUFFER_REQUEST: u8 = 0x13;
 
-    /// A mock keyboard connection whose keycode writes fail, as an unplugged cable would.
-    struct FailingKeycodeWrites(MockTransport);
+    /// A mock keyboard connection on which one VIA request fails, as an unplugged cable would.
+    struct FailingRequest {
+        request: u8,
+        transport: MockTransport,
+    }
 
-    impl HidTransport for FailingKeycodeWrites {
+    fn failing_keycode_writes(mock: &Mock) -> FailingRequest {
+        FailingRequest {
+            request: SET_KEYCODE_REQUEST,
+            transport: mock.keyboard.connect(),
+        }
+    }
+
+    impl HidTransport for FailingRequest {
         fn write(&mut self, report: &[u8]) -> Result<(), TransportError> {
-            if report.first() == Some(&SET_KEYCODE_REQUEST) {
+            if report.first() == Some(&self.request) {
                 return Err(TransportError::Device("unplugged".to_owned()));
             }
-            self.0.write(report)
+            self.transport.write(report)
         }
 
         fn read(&mut self, timeout: Duration) -> Result<Vec<u8>, TransportError> {
-            self.0.read(timeout)
+            self.transport.read(timeout)
         }
+    }
+
+    fn failing_keymap_buffer(mock: &Mock) -> FailingRequest {
+        FailingRequest {
+            request: SET_KEYMAP_BUFFER_REQUEST,
+            transport: mock.keyboard.connect(),
+        }
+    }
+
+    #[test]
+    fn an_undo_that_fails_after_its_backup_says_to_undo_again() {
+        let mut mock = Mock::new();
+        mock.set(0, KC_A);
+        let error = undo(
+            failing_keymap_buffer(&mock),
+            &mock.device,
+            &mut mock.history,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "device I/O failed: unplugged; the keyboard may have changed: Undo again to retry"
+        );
+    }
+
+    #[test]
+    fn undoing_again_after_a_failed_undo_puts_the_key_back() {
+        let mut mock = Mock::new();
+        mock.set(0, KC_A);
+        undo(
+            failing_keymap_buffer(&mock),
+            &mock.device,
+            &mut mock.history,
+        )
+        .unwrap_err();
+        let undone = mock.undo();
+        assert_eq!((keycode_at(&undone, 0), undone.undo_steps), (0, 0));
+    }
+
+    #[test]
+    fn a_restore_that_fails_after_its_backup_says_how_to_get_back() {
+        let mut mock = Mock::new();
+        mock.set(0, KC_A);
+        let error = restore_backup(
+            failing_keymap_buffer(&mock),
+            &mock.device,
+            &mut mock.history,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "device I/O failed: unplugged; the keyboard may have changed: Undo puts back the \
+             keymap from before the restore, and Restore backup tries again"
+        );
     }
 
     #[test]
     fn a_write_that_fails_after_the_backup_says_undo_puts_it_back() {
         let mut mock = Mock::new();
         let error = set_keycode(
-            FailingKeycodeWrites(mock.keyboard.connect()),
+            failing_keycode_writes(&mock),
             &mock.device,
             &mut mock.history,
             assignment(0, KC_A),
@@ -413,7 +562,7 @@ mod tests {
         let mut mock = Mock::new();
         let before = mock.read().keymap;
         set_keycode(
-            FailingKeycodeWrites(mock.keyboard.connect()),
+            failing_keycode_writes(&mock),
             &mock.device,
             &mut mock.history,
             assignment(0, KC_A),

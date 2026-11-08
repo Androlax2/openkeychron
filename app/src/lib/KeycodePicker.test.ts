@@ -83,9 +83,20 @@ describe("KeycodePicker", () => {
   it("says so when no keycode matches", () => {
     const view = render();
     search(view, "nothing like this");
-    expect(view.querySelector(".no-match")?.textContent?.trim()).toBe(
+    expect(view.querySelector(".match-count")?.textContent?.trim()).toBe(
       "No keycode matches “nothing like this”.",
     );
+  });
+
+  it("says how many keycodes match", () => {
+    const view = render();
+    search(view, "MO(");
+    expect(view.querySelector(".match-count")?.textContent?.trim()).toBe("4 keycodes match.");
+  });
+
+  it("announces the match count as it changes", () => {
+    const view = render();
+    expect(view.querySelector(".match-count")?.getAttribute("aria-live")).toBe("polite");
   });
 
   it("reports the keycode the user chooses", () => {

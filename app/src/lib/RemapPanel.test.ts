@@ -78,23 +78,42 @@ describe("RemapPanel", () => {
     );
   });
 
-  it("cannot apply before a key is selected, and says why", () => {
+  function applyHint(view: HTMLElement): string | undefined {
+    return view.querySelector(".apply-hint")?.textContent?.trim();
+  }
+
+  it("cannot apply before a key is selected", () => {
     const view = render(EDITABLE_KEYMAP, null);
     choose(view, "ESC");
-    const apply = button(view, "Apply");
-    expect([apply.disabled, view.querySelector(".apply-hint")?.textContent?.trim()]).toEqual([
-      true,
-      "Select a key on the keyboard first.",
-    ]);
+    expect(button(view, "Apply").disabled).toBe(true);
   });
 
-  it("cannot apply before a keycode is chosen, and says why", () => {
+  it("asks for a key when none is selected", () => {
+    const view = render(EDITABLE_KEYMAP, null);
+    choose(view, "ESC");
+    expect(applyHint(view)).toBe("Select a key on the keyboard first.");
+  });
+
+  it("cannot apply before a keycode is chosen", () => {
     const view = render();
-    const apply = button(view, "Apply");
-    expect([apply.disabled, view.querySelector(".apply-hint")?.textContent?.trim()]).toEqual([
-      true,
-      "Choose a keycode for it.",
-    ]);
+    expect(button(view, "Apply").disabled).toBe(true);
+  });
+
+  it("asks for a keycode when none is chosen", () => {
+    const view = render();
+    expect(applyHint(view)).toBe("Choose a keycode for it.");
+  });
+
+  it("cannot apply the keycode the key already has", () => {
+    const view = render();
+    choose(view, "W");
+    expect(button(view, "Apply").disabled).toBe(true);
+  });
+
+  it("says the key already has the chosen keycode", () => {
+    const view = render();
+    choose(view, "W");
+    expect(applyHint(view)).toBe("The key already has this keycode.");
   });
 
   it("sets the selected key to the chosen keycode", async () => {
@@ -138,11 +157,33 @@ describe("RemapPanel", () => {
     const reason =
       "device I/O failed: unplugged; the keyboard may have changed: Undo puts back the keymap " +
       "from before this change";
-    mockIPC(() => Promise.reject(reason));
+    mockIPC((command) => (command === "read_keymap" ? EDITABLE_KEYMAP : Promise.reject(reason)));
     const view = render();
     choose(view, "ESC");
     button(view, "Apply").click();
     await vi.waitFor(() => expect(alertText(view)).toBe(`Cannot apply: ${reason}`));
+  });
+
+  it("after a failed write, offers the undo the app kept, read again from the app", async () => {
+    const changes: EditableKeymap[] = [];
+    const kept: EditableKeymap = { ...EDITABLE_KEYMAP, undoSteps: 1, canRestoreBackup: true };
+    mockIPC((command) => (command === "read_keymap" ? kept : Promise.reject("unplugged")));
+    const view = render(EDITABLE_KEYMAP, Z_KEY, (editable) => changes.push(editable));
+    choose(view, "ESC");
+    button(view, "Apply").click();
+    await vi.waitFor(() => expect(changes).toEqual([kept]));
+  });
+
+  it("says so when the keymap cannot be read again after a failed write", async () => {
+    mockIPC(() => Promise.reject("unplugged"));
+    const view = render();
+    choose(view, "ESC");
+    button(view, "Apply").click();
+    await vi.waitFor(() =>
+      expect(alertText(view)).toBe(
+        "Cannot apply: unplugged. Reading the keymap again also failed: unplugged",
+      ),
+    );
   });
 
   it("offers no undo and no restore before the app changed anything", () => {

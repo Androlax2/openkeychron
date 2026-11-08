@@ -1,7 +1,7 @@
 <script lang="ts">
 import type { EditableKeymap, Key } from "./bindings";
 import { KEYCODE_CATEGORIES } from "./bindings";
-import { restoreKeymapBackup, setKeycode, undoKeymapChange } from "./commands";
+import { readKeymap, restoreKeymapBackup, setKeycode, undoKeymapChange } from "./commands";
 import type { KeySelection } from "./Keyboard.svelte";
 import KeycodePicker from "./KeycodePicker.svelte";
 import { describeKeycode } from "./keycode-text";
@@ -44,7 +44,9 @@ const applyHint = $derived(
     ? "Select a key on the keyboard first."
     : chosen === null
       ? "Choose a keycode for it."
-      : null,
+      : chosen === selectedKey.keycode
+        ? "The key already has this keycode."
+        : null,
 );
 
 function keyAt(keymap: EditableKeymap, at: KeySelection): Key | null {
@@ -85,9 +87,22 @@ async function write(
       text: `${done}, and the whole keymap read back as expected.${readBack(updated, at)}`,
     };
   } catch (reason: unknown) {
-    outcome = { failed: true, text: `${failure}: ${String(reason)}` };
+    outcome = { failed: true, text: `${failure}: ${String(reason)}${await readAgain()}` };
   } finally {
     pending = null;
+  }
+}
+
+/**
+ * After a failed write, reads the keymap again: a write that failed after its backup has already
+ * given Undo a step, and the keyboard may have changed. Returns what to add to the failure.
+ */
+async function readAgain(): Promise<string> {
+  try {
+    onchange(await readKeymap(path));
+    return "";
+  } catch (reason: unknown) {
+    return `. Reading the keymap again also failed: ${String(reason)}`;
   }
 }
 

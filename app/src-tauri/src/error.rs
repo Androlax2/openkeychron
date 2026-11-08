@@ -43,12 +43,22 @@ pub enum CommandError {
     /// A write failed after its backup was kept, so the keyboard may have changed.
     #[error("{error}; the keyboard may have changed: {recovery}")]
     WriteFailedAfterBackup {
-        error: Box<GuardError>,
+        error: Box<CommandError>,
         recovery: &'static str,
     },
 
-    #[error("nothing to undo: the app has not changed this keyboard's keymap since it started")]
+    #[error(
+        "nothing left to undo: Undo takes back only the keymap changes the app made since it \
+         started"
+    )]
     NothingToUndo,
+
+    #[error(
+        "the keymap is not as the app left it, so Undo would also take back changes made \
+         outside the app; nothing was written. Restore backup still puts back the keymap from \
+         before the app's first change"
+    )]
+    KeymapChangedOutsideApp,
 
     #[error("no keymap backup yet: the app keeps one when it first changes this keyboard's keymap")]
     NoKeymapBackup,

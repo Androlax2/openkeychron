@@ -187,4 +187,54 @@ describe("the start page", () => {
     });
     expect(writes).toEqual([{ path: KEYBOARD.path, assignment: { ...position, keycode: 0x0029 } }]);
   });
+
+  /** Clicks the key at `row`, `column` once the keyboard is drawn. */
+  async function selectKey(view: HTMLElement, row: number, column: number): Promise<void> {
+    const key = await vi.waitFor(() => {
+      const found = view.querySelector<SVGGElement>(`[data-row="${row}"][data-column="${column}"]`);
+      if (found === null) {
+        throw new Error("the keyboard is not drawn yet");
+      }
+      return found;
+    });
+    key.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    flushSync();
+  }
+
+  function buttonNamed(view: HTMLElement, name: string): HTMLButtonElement | undefined {
+    return [...view.querySelectorAll("button")].find((button) =>
+      button.textContent?.trim().startsWith(name),
+    );
+  }
+
+  it("forgets the selected key when another device's keys are shown", async () => {
+    mockIPC((command) =>
+      command === "list_devices" ? [KEYBOARD, SECOND_KEYBOARD] : EDITABLE_KEYMAP,
+    );
+    const view = render();
+    await showKeysOf(view, KEYBOARD);
+    await selectKey(view, 1, 1);
+    await showKeysOf(view, SECOND_KEYBOARD);
+    await vi.waitFor(() => {
+      expect(view.querySelector(".selected-key")?.textContent?.trim()).toBe("No key selected.");
+    });
+  });
+
+  it("offers the undo the app kept for a device when its keys are shown again", async () => {
+    const histories: Record<string, EditableKeymap> = {
+      [KEYBOARD.path]: { ...EDITABLE_KEYMAP, undoSteps: 1, canRestoreBackup: true },
+      [SECOND_KEYBOARD.path]: EDITABLE_KEYMAP,
+    };
+    mockIPC((command, payload) =>
+      command === "list_devices"
+        ? [KEYBOARD, SECOND_KEYBOARD]
+        : histories[(payload as { path: string }).path],
+    );
+    const view = render();
+    await showKeysOf(view, SECOND_KEYBOARD);
+    await showKeysOf(view, KEYBOARD);
+    await vi.waitFor(() => {
+      expect(buttonNamed(view, "Undo")?.disabled).toBe(false);
+    });
+  });
 });
