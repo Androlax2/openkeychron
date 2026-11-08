@@ -53,8 +53,9 @@ bounds: Bounds | null,
  */
 secondaryBounds: Bounds | null, keycode: number, 
 /**
- * QMK's name for `keycode`, such as `LCTL(C)`. Absent for a custom or unknown keycode:
- * show `keycode` then.
+ * QMK's name for `keycode`, such as `LCTL(C)`, or the connected model's name for a
+ * Keychron custom keycode, such as `LOPTN`. Absent for any other custom or unknown
+ * keycode: show `keycode` then.
  */
 name: string | null, };
 
