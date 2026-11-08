@@ -1,13 +1,14 @@
-//! What `read_keymap` returns: every layer's raw keycodes on the matrix grid, with the built-in physical legends.
+//! What `read_keymap` returns: every layer's raw keycodes on the matrix grid, with each
+//! physical key's place on the keyboard and its built-in legends.
 //! Only reads.
 
 use openkeychron_hid::{HidTransport, KeychronDevice};
-use openkeychron_via::{DeviceRegistry, Keycode, RegisteredLayout, Via};
+use openkeychron_via::{DeviceRegistry, Keycode, Legends, Rectangle, RegisteredLayout, Via};
 use serde::Serialize;
 
 use crate::error::CommandError;
 
-#[derive(Debug, PartialEq, Eq, Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Keymap {
@@ -17,7 +18,7 @@ pub struct Keymap {
     pub layers: Vec<Layer>,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Layer {
@@ -26,7 +27,7 @@ pub struct Layer {
     pub keys: Vec<Key>,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Key {
@@ -34,9 +35,63 @@ pub struct Key {
     pub column: u8,
     /// The physical French legend, which names the position, not what the key now types.
     pub legend: Option<String>,
+    /// The keycap's Shift legend, such as `2` on the `é` key.
+    pub shift_legend: Option<String>,
+    /// The keycap's AltGr legend, such as `~` on the `é` key.
+    pub alt_gr_legend: Option<String>,
     /// False for matrix slots no physical key uses.
     pub is_physical: bool,
+    /// Where the key sits, in key units from the keyboard's top-left corner. Absent for a
+    /// matrix slot no physical key uses.
+    pub bounds: Option<Bounds>,
+    /// A second rectangle that, with `bounds`, makes a shape such as ISO Enter.
+    pub secondary_bounds: Option<Bounds>,
     pub keycode: u16,
+}
+
+/// A rectangle in key units: 1.0 is one standard key.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct Bounds {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl From<Rectangle> for Bounds {
+    fn from(rectangle: Rectangle) -> Self {
+        Self {
+            x: rectangle.x,
+            y: rectangle.y,
+            width: rectangle.width,
+            height: rectangle.height,
+        }
+    }
+}
+
+/// What the layout says about one physical key; definitions from a file carry no legends.
+struct Placement {
+    bounds: Rectangle,
+    secondary_bounds: Option<Rectangle>,
+    legends: Option<Legends>,
+}
+
+fn placement(layout: &RegisteredLayout, row: u8, column: u8) -> Option<Placement> {
+    match layout {
+        RegisteredLayout::BuiltIn(layout) => layout.key(row, column).map(|key| Placement {
+            bounds: key.bounds,
+            secondary_bounds: key.secondary_bounds,
+            legends: Some(key.legends),
+        }),
+        RegisteredLayout::Definition(definition) => {
+            definition.key(row, column).map(|key| Placement {
+                bounds: key.bounds,
+                secondary_bounds: key.secondary_bounds,
+                legends: None,
+            })
+        }
+    }
 }
 
 pub fn read<T: HidTransport>(
@@ -83,19 +138,33 @@ fn keys(layout: &RegisteredLayout, keycodes: &[Keycode]) -> Vec<Key> {
         (0..layout.rows()).flat_map(|row| (0..layout.columns()).map(move |column| (row, column)));
     positions
         .zip(keycodes)
-        .map(|((row, column), keycode)| Key {
-            row,
-            column,
-            legend: layout.legend(row, column).map(str::to_owned),
-            is_physical: layout.has_key(row, column),
-            keycode: u16::from(*keycode),
+        .map(|((row, column), keycode)| {
+            let placement = placement(layout, row, column);
+            let legends = placement.as_ref().and_then(|placement| placement.legends);
+            Key {
+                row,
+                column,
+                legend: legends.map(|legends| legends.base.to_owned()),
+                shift_legend: legends.and_then(|legends| legends.shift).map(str::to_owned),
+                alt_gr_legend: legends
+                    .and_then(|legends| legends.alt_gr)
+                    .map(str::to_owned),
+                is_physical: placement.is_some(),
+                bounds: placement.as_ref().map(|placement| placement.bounds.into()),
+                secondary_bounds: placement
+                    .and_then(|placement| placement.secondary_bounds)
+                    .map(Bounds::from),
+                keycode: u16::from(*keycode),
+            }
         })
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Key, read};
+    use openkeychron_via::{RegisteredLayout, ViaDefinition};
+
+    use super::{Bounds, Key, Keymap, keys, read};
     use crate::test_support::{lend, load_fixture, replay};
 
     #[test]
@@ -120,7 +189,16 @@ mod tests {
                 row: 2,
                 column: 1,
                 legend: Some("A".to_owned()),
+                shift_legend: None,
+                alt_gr_legend: None,
                 is_physical: true,
+                bounds: Some(Bounds {
+                    x: 1.5,
+                    y: 2.25,
+                    width: 1.0,
+                    height: 1.0,
+                }),
+                secondary_bounds: None,
                 keycode: 0x0014,
             }
         );
@@ -129,6 +207,93 @@ mod tests {
         assert_eq!(keymap.layers[1].index, 1);
         assert_eq!(keymap.layers[1].keys[113].keycode, 0xffff);
         assert_eq!(replay.finish(), vec![]);
+    }
+
+    fn read_synthetic_keymap() -> Keymap {
+        let mut replay = replay("cli-keymap.toml");
+        read(lend(&mut replay.transport), &replay.device).unwrap()
+    }
+
+    #[test]
+    fn gives_a_matrix_slot_without_a_physical_key_no_bounds() {
+        let keymap = read_synthetic_keymap();
+        let unused = &keymap.layers[0].keys[1];
+        assert_eq!(
+            (unused.is_physical, unused.bounds, unused.secondary_bounds),
+            (false, None, None)
+        );
+    }
+
+    #[test]
+    fn gives_iso_enter_its_second_rectangle() {
+        let keymap = read_synthetic_keymap();
+        let enter = &keymap.layers[0].keys[2 * 19 + 13];
+        assert_eq!(enter.legend.as_deref(), Some("Enter"));
+        assert_eq!(
+            (enter.bounds, enter.secondary_bounds),
+            (
+                Some(Bounds {
+                    x: 13.75,
+                    y: 2.25,
+                    width: 1.25,
+                    height: 2.0,
+                }),
+                Some(Bounds {
+                    x: 13.5,
+                    y: 2.25,
+                    width: 1.5,
+                    height: 1.0,
+                })
+            )
+        );
+    }
+
+    #[test]
+    fn gives_the_french_shift_and_alt_gr_legends() {
+        let keymap = read_synthetic_keymap();
+        let e_acute = &keymap.layers[0].keys[19 + 2];
+        assert_eq!(
+            (
+                e_acute.legend.as_deref(),
+                e_acute.shift_legend.as_deref(),
+                e_acute.alt_gr_legend.as_deref()
+            ),
+            (Some("é"), Some("2"), Some("~"))
+        );
+    }
+
+    #[test]
+    fn places_the_keys_of_a_via_definition_without_legends() {
+        let text = std::fs::read_to_string(crate::test_support::synthetic_path(
+            "via-definition-second-model.json",
+        ))
+        .unwrap();
+        let definition = ViaDefinition::from_json(&text).unwrap();
+        let first = definition.keys[0];
+        let layout = RegisteredLayout::Definition(definition);
+        let layer_size = usize::from(layout.rows()) * usize::from(layout.columns());
+        let placed = keys(&layout, &vec![0u16.into(); layer_size]);
+        let key = placed
+            .iter()
+            .find(|key| [key.row, key.column] == first.matrix)
+            .unwrap();
+        assert_eq!(
+            (
+                key.bounds,
+                key.legend.as_deref(),
+                key.shift_legend.as_deref()
+            ),
+            (
+                Some(Bounds {
+                    x: first.bounds.x,
+                    y: first.bounds.y,
+                    width: first.bounds.width,
+                    height: first.bounds.height,
+                }),
+                None,
+                None
+            )
+        );
     }
 
     #[test]

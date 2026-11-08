@@ -32,9 +32,28 @@ export type Key = { row: number, column: number,
  */
 legend: string | null, 
 /**
+ * The keycap's Shift legend, such as `2` on the `é` key.
+ */
+shiftLegend: string | null, 
+/**
+ * The keycap's AltGr legend, such as `~` on the `é` key.
+ */
+altGrLegend: string | null, 
+/**
  * False for matrix slots no physical key uses.
  */
-isPhysical: boolean, keycode: number, };
+isPhysical: boolean, 
+/**
+ * Where the key sits, in key units from the keyboard's top-left corner. Absent for a
+ * matrix slot no physical key uses.
+ */
+bounds: Bounds | null, 
+/**
+ * A second rectangle that, with `bounds`, makes a shape such as ISO Enter.
+ */
+secondaryBounds: Bounds | null, keycode: number, };
+
+export type Bounds = { x: number, y: number, width: number, height: number, };
 
 export type MacroList = { macroCount: number, bufferSize: number, 
 /**
