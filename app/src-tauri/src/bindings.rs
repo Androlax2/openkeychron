@@ -1,0 +1,112 @@
+//! Keeps `app/src/lib/bindings.ts`, the TypeScript types of what the commands take and return
+//! and the remap panel's keycode catalog, equal to the Rust side. A change to either fails this
+//! test until the file is regenerated:
+//!
+//! ```sh
+//! OPENKEYCHRON_WRITE_BINDINGS=1 cargo test -p openkeychron-app bindings
+//! ```
+
+use std::fmt::Write;
+
+use ts_rs::{Config, TS};
+
+use crate::device::Device;
+use crate::info::{DeviceInfo, KeychronFirmware};
+use crate::keycode_catalog::{self, KeycodeCategory, KeycodeChoice};
+use crate::keymap::{Bounds, Key, Keymap, Layer};
+use crate::keymap_edit::{EditableKeymap, KeyAssignment};
+use crate::macros::{Action, MacroContent, MacroList, MacroSlot};
+use crate::settings::{
+    Debounce, DebounceAlgorithm, Settings, SnapClickMode, SnapClickPair, WirelessTimers,
+};
+
+const HEADER: &str = "// Generated from app/src-tauri by `OPENKEYCHRON_WRITE_BINDINGS=1 cargo test -p \
+                      openkeychron-app bindings`. Do not edit.\n";
+
+fn bindings() -> String {
+    let config = Config::new();
+    let declarations = [
+        Device::decl(&config),
+        DeviceInfo::decl(&config),
+        KeychronFirmware::decl(&config),
+        Keymap::decl(&config),
+        Layer::decl(&config),
+        Key::decl(&config),
+        Bounds::decl(&config),
+        EditableKeymap::decl(&config),
+        KeyAssignment::decl(&config),
+        KeycodeCategory::decl(&config),
+        KeycodeChoice::decl(&config),
+        MacroList::decl(&config),
+        MacroSlot::decl(&config),
+        MacroContent::decl(&config),
+        Action::decl(&config),
+        Settings::decl(&config),
+        Debounce::decl(&config),
+        DebounceAlgorithm::decl(&config),
+        SnapClickPair::decl(&config),
+        SnapClickMode::decl(&config),
+        WirelessTimers::decl(&config),
+    ];
+    let mut text = HEADER.to_owned();
+    for declaration in declarations {
+        text.push_str("\nexport ");
+        text.push_str(&declaration);
+        text.push('\n');
+    }
+    text.push_str(&catalog());
+    text
+}
+
+/// `KEYCODE_CATEGORIES`, one keycode per line.
+fn catalog() -> String {
+    let mut text = "\n/** The keycodes the remap panel offers, by category. */\n\
+                    export const KEYCODE_CATEGORIES: readonly KeycodeCategory[] = [\n"
+        .to_owned();
+    for category in keycode_catalog::categories() {
+        writeln!(
+            text,
+            "  {{\n    name: {},\n    keycodes: [",
+            serde_json::to_string(category.name).unwrap()
+        )
+        .unwrap();
+        for choice in category.keycodes {
+            let layer = choice
+                .layer
+                .map_or_else(|| "null".to_owned(), |layer| layer.to_string());
+            writeln!(
+                text,
+                "      {{ keycode: 0x{:04x}, name: {}, layer: {layer} }},",
+                choice.keycode,
+                serde_json::to_string(&choice.name).unwrap()
+            )
+            .unwrap();
+        }
+        text.push_str("    ],\n  },\n");
+    }
+    text.push_str("];\n");
+    text
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::bindings;
+
+    #[test]
+    fn the_committed_typescript_bindings_match_the_rust_types() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/lib/bindings.ts");
+        let generated = bindings();
+        if std::env::var_os("OPENKEYCHRON_WRITE_BINDINGS").is_some() {
+            std::fs::write(&path, &generated).unwrap();
+        }
+        let committed = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(
+            committed == generated,
+            "{} is out of date; regenerate it with \
+             `OPENKEYCHRON_WRITE_BINDINGS=1 cargo test -p openkeychron-app bindings`",
+            path.display()
+        );
+    }
+}

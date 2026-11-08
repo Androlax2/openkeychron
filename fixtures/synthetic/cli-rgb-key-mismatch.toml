@@ -1,0 +1,84 @@
+# Hand-written, not recorded: `openkeychron rgb key --backup FILE A 0 255` where the colour reads
+# back wrong (hue 85 instead of 0): the previous colour (hue 170) is set again and read back, and
+# no save (a8 02) follows. LED 38 is made up. Bytes follow keyboards/keychron/common/rgb/
+# keychron_rgb.c at Keychron/qmk_firmware 2b493ff9.
+format_version = 1
+
+[device]
+name = "Keychron V5 Max"
+vendor_id = 0x3434
+product_id = 0x0951
+usage_page = 0xff60
+usage = 0x61
+
+[[event]]
+kind = "write"
+data = "a2 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a2 00 f7 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "a8 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a8 01 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "a8 05 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a8 05 00 62 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "a8 06 02 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a8 06 00 ff 26 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "a8 09 26 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a8 09 00 aa ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "a8 0a 26 01 00 ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a8 0a 00 01 00 ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "a8 09 26 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a8 09 00 55 ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "a8 0a 26 01 aa ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a8 0a 00 01 aa ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "a8 09 26 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "a8 09 00 aa ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"

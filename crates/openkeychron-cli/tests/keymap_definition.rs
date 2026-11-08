@@ -1,0 +1,405 @@
+//! Drives a second registered model, `3434:0950`, with a hand-written VIA definition and
+//! replay, never a hardware session: `keymap show --layout` reads it, and every write is
+//! refused because no write to it was verified on hardware.
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+    use std::process::{Command, Output};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use openkeychron_hid::Fixture;
+    use serde_json::Value;
+
+    fn synthetic(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/synthetic")
+            .join(name)
+    }
+
+    fn second_model_fixture() -> Fixture {
+        Fixture::load(&synthetic("cli-keymap-second-model.toml")).unwrap()
+    }
+
+    fn second_model_definition() -> PathBuf {
+        synthetic("via-definition-second-model.json")
+    }
+
+    fn temporary_path(extension: &str) -> PathBuf {
+        static NEXT_FILE: AtomicUsize = AtomicUsize::new(0);
+        std::env::temp_dir().join(format!(
+            "openkeychron-keymap-definition-{}-{}.{extension}",
+            std::process::id(),
+            NEXT_FILE.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    fn run_fixture(arguments: &[&str], layout: &Path, fixture: &Fixture) -> Output {
+        let mut with_layout = arguments.to_vec();
+        let layout = layout.to_str().unwrap();
+        with_layout.extend(["--layout", layout]);
+        run_without_layout(&with_layout, fixture)
+    }
+
+    fn run_without_layout(arguments: &[&str], fixture: &Fixture) -> Output {
+        let path = temporary_path("toml");
+        fixture.save(&path).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_openkeychron"))
+            .args(arguments)
+            .arg("--fixture")
+            .arg(&path)
+            .output()
+            .unwrap();
+        std::fs::remove_file(path).unwrap();
+        output
+    }
+
+    /// Every write command, saving its pre-change backup to `backup`.
+    fn write_commands(backup: &Path) -> Vec<Vec<String>> {
+        let backup = backup.to_str().unwrap();
+        let keymap_source = synthetic("keymap-backup.json");
+        let macro_source = synthetic("macro-backup.json");
+        [
+            vec!["keymap", "set", "0", "0,0", "0x04", "--backup", backup],
+            vec![
+                "keymap",
+                "restore",
+                keymap_source.to_str().unwrap(),
+                "--backup",
+                backup,
+            ],
+            vec!["keymap", "reset", "--backup", backup],
+            vec![
+                "macro",
+                "set",
+                "1",
+                "--host-layout",
+                "us",
+                "tap:0x2c",
+                "--backup",
+                backup,
+            ],
+            vec![
+                "macro",
+                "restore",
+                macro_source.to_str().unwrap(),
+                "--backup",
+                backup,
+            ],
+            vec!["rgb", "key", "--backup", backup, "0,0", "0", "255"],
+            vec!["rgb", "set", "--backup", backup, "brightness", "128"],
+            vec!["rgb", "set", "--backup", backup, "effect", "1"],
+            vec!["rgb", "set", "--backup", backup, "speed", "10"],
+            vec!["rgb", "set", "--backup", backup, "color", "0", "255"],
+            vec![
+                "settings", "set", "--backup", backup, "debounce", "none", "0",
+            ],
+            vec![
+                "settings",
+                "set",
+                "--backup",
+                backup,
+                "snap-click",
+                "0",
+                "regular",
+                "0x04",
+                "0x07",
+            ],
+            vec![
+                "settings", "set", "--backup", backup, "wireless", "30", "3600",
+            ],
+        ]
+        .into_iter()
+        .map(|command| command.into_iter().map(str::to_owned).collect())
+        .collect()
+    }
+
+    fn arguments(command: &[String]) -> Vec<&str> {
+        command.iter().map(String::as_str).collect()
+    }
+
+    /// A backup fixture naming the second model, in a temporary file.
+    fn backup_for_second_model(name: &str) -> PathBuf {
+        let text = std::fs::read_to_string(synthetic(name)).unwrap();
+        let from = r#""product_id": 2385"#;
+        assert!(text.contains(from), "{from} is not in {name}");
+        let path = temporary_path("json");
+        std::fs::write(&path, text.replace(from, r#""product_id": 2384"#)).unwrap();
+        path
+    }
+
+    /// The second model's definition with `from` replaced by `to`, in a temporary file.
+    fn edited_definition(from: &str, to: &str) -> PathBuf {
+        let text = std::fs::read_to_string(second_model_definition()).unwrap();
+        assert!(text.contains(from), "{from} is not in the definition");
+        let path = temporary_path("json");
+        std::fs::write(&path, text.replace(from, to)).unwrap();
+        path
+    }
+
+    fn without_events(mut fixture: Fixture) -> Fixture {
+        fixture.events.clear();
+        fixture
+    }
+
+    fn stdout(output: &Output) -> String {
+        String::from_utf8(output.stdout.clone()).unwrap()
+    }
+
+    fn stderr(output: &Output) -> String {
+        String::from_utf8(output.stderr.clone()).unwrap()
+    }
+
+    fn assert_refused(output: &Output, expected: &str) {
+        assert!(!output.status.success());
+        assert_eq!(stdout(output), "");
+        assert!(stderr(output).contains(expected), "{}", stderr(output));
+    }
+
+    #[test]
+    fn json_uses_the_definition_matrix_size_and_reads_every_slot() {
+        let output = run_fixture(
+            &["keymap", "show", "--json"],
+            &second_model_definition(),
+            &second_model_fixture(),
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+        let json: Value = serde_json::from_str(&stdout(&output)).unwrap();
+        assert_eq!(json["device"]["product_id"], 0x0950);
+        assert_eq!(
+            (json["rows"].clone(), json["columns"].clone()),
+            (2.into(), 4.into())
+        );
+        let keycodes: Vec<_> = json["layers"][0]["keys"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|key| key["keycode"].as_u64().unwrap())
+            .collect();
+        assert_eq!(keycodes, [0x29, 0x04, 0x05, 0xe2, 0x2b, 0x28, 0, 0]);
+    }
+
+    #[test]
+    fn json_marks_which_positions_are_physical_keys_without_inventing_legends() {
+        let output = run_fixture(
+            &["keymap", "show", "--json"],
+            &second_model_definition(),
+            &second_model_fixture(),
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+        let json: Value = serde_json::from_str(&stdout(&output)).unwrap();
+        let keys = json["layers"][0]["keys"].as_array().unwrap();
+        let physical: Vec<_> = keys
+            .iter()
+            .map(|key| key["is_physical"].as_bool().unwrap())
+            .collect();
+        assert_eq!(physical, [true, true, true, true, true, true, false, true]);
+        assert!(keys.iter().all(|key| key["legend"] == Value::Null));
+    }
+
+    #[test]
+    fn text_grid_names_positions_and_shows_a_physical_key_assigned_zero() {
+        let output = run_fixture(
+            &["keymap", "show"],
+            &second_model_definition(),
+            &second_model_fixture(),
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+        let text = stdout(&output);
+        for expected in [
+            "Layer 0",
+            "(0,0)=ESC 0x0029",
+            "(1,1)=ENT 0x0028",
+            "(1,3)=NO 0x0000",
+        ] {
+            assert!(text.contains(expected), "missing {expected}: {text}");
+        }
+        assert!(!text.contains("(1,2)"), "{text}");
+        assert!(!text.contains("FR legends"), "{text}");
+    }
+
+    #[test]
+    fn a_model_without_a_known_layout_asks_for_its_definition_before_sending_reports() {
+        let path = temporary_path("toml");
+        without_events(second_model_fixture()).save(&path).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_openkeychron"))
+            .args(["keymap", "show", "--fixture"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert_refused(&output, "no layout for 3434:0950; pass --layout");
+    }
+
+    #[test]
+    fn a_definition_for_another_model_is_refused_before_sending_reports() {
+        let layout = edited_definition(r#""0x0950""#, r#""0x0952""#);
+        let output = run_fixture(
+            &["keymap", "show"],
+            &layout,
+            &without_events(second_model_fixture()),
+        );
+        std::fs::remove_file(layout).unwrap();
+        assert_refused(
+            &output,
+            "is for Synthetic second model (3434:0952), but the keyboard is 3434:0950",
+        );
+    }
+
+    #[test]
+    fn a_definition_does_not_replace_the_built_in_v5_max_iso_layout() {
+        let layout = edited_definition(r#""0x0950""#, r#""0x0951""#);
+        let mut fixture = without_events(second_model_fixture());
+        fixture.device.product_id = 0x0951;
+        let output = run_fixture(&["keymap", "show"], &layout, &fixture);
+        std::fs::remove_file(layout).unwrap();
+        assert_refused(&output, "already known");
+    }
+
+    #[test]
+    fn a_receiver_is_refused_even_with_a_definition() {
+        let mut fixture = without_events(second_model_fixture());
+        fixture.device.product_id = 0xd030;
+        let output = run_fixture(&["keymap", "show"], &second_model_definition(), &fixture);
+        assert_refused(&output, "USB cable");
+    }
+
+    #[test]
+    fn an_invalid_definition_names_the_file_and_the_problem() {
+        let layout = edited_definition(r#""0,1""#, r#""0,1", {"r": 15}"#);
+        let output = run_fixture(
+            &["keymap", "show"],
+            &layout,
+            &without_events(second_model_fixture()),
+        );
+        std::fs::remove_file(&layout).unwrap();
+        assert_refused(&output, &format!("layout file {}: ", layout.display()));
+        assert!(
+            stderr(&output).contains(r#"uses "r""#),
+            "{}",
+            stderr(&output)
+        );
+    }
+
+    #[test]
+    fn a_missing_definition_file_is_named() {
+        let layout = temporary_path("json");
+        let output = run_fixture(
+            &["keymap", "show"],
+            &layout,
+            &without_events(second_model_fixture()),
+        );
+        assert_refused(
+            &output,
+            &format!("cannot read layout file {}", layout.display()),
+        );
+    }
+
+    #[test]
+    fn every_write_to_the_second_model_is_refused_before_sending_reports() {
+        for command in write_commands(&temporary_path("json")) {
+            let output = run_without_layout(
+                &arguments(&command),
+                &without_events(second_model_fixture()),
+            );
+            assert_refused(
+                &output,
+                "require the V5 Max ISO (3434:0951) on a USB cable; receiver and \
+                 unverified-model writes are refused (got 3434:0950)",
+            );
+        }
+    }
+
+    /// A V5 Max write session relabelled as the second model, so only the model check can
+    /// stop the write.
+    fn v5_max_session_as_second_model(name: &str) -> Fixture {
+        let mut fixture = Fixture::load(&synthetic(name)).unwrap();
+        assert_eq!(fixture.device.product_id, 0x0951, "{name}");
+        fixture.device.product_id = 0x0950;
+        fixture
+    }
+
+    #[test]
+    fn rgb_and_settings_writes_refuse_the_second_model_before_saving_a_backup() {
+        let sessions = [
+            (
+                "cli-rgb-set-brightness.toml",
+                "rgb",
+                &["brightness", "128"][..],
+            ),
+            (
+                "cli-settings-set-debounce.toml",
+                "settings",
+                &["debounce", "symmetric-eager-per-key", "10"],
+            ),
+            (
+                "cli-settings-set-wireless.toml",
+                "settings",
+                &["wireless", "30", "3600"],
+            ),
+        ];
+        for (name, command, value) in sessions {
+            let backup = temporary_path("json");
+            let mut arguments = vec![command, "set", "--backup", backup.to_str().unwrap()];
+            arguments.extend(value);
+            let output = run_without_layout(&arguments, &v5_max_session_as_second_model(name));
+            assert_refused(
+                &output,
+                "unverified-model writes are refused (got 3434:0950)",
+            );
+            assert!(!backup.exists(), "{name} saved {}", backup.display());
+        }
+    }
+
+    #[test]
+    fn no_write_command_accepts_a_layout_file() {
+        for command in write_commands(&temporary_path("json")) {
+            let output = run_fixture(
+                &arguments(&command),
+                &second_model_definition(),
+                &without_events(second_model_fixture()),
+            );
+            assert_refused(&output, "unexpected argument '--layout'");
+        }
+    }
+
+    #[test]
+    fn a_keymap_backup_of_the_second_model_is_refused() {
+        let source = backup_for_second_model("keymap-backup.json");
+        let output = run_without_layout(
+            &[
+                "keymap",
+                "restore",
+                source.to_str().unwrap(),
+                "--backup",
+                temporary_path("json").to_str().unwrap(),
+            ],
+            &without_events(second_model_fixture()),
+        );
+        std::fs::remove_file(source).unwrap();
+        assert_refused(
+            &output,
+            "invalid keymap backup: device 3434:0950 is not a model verified for writes",
+        );
+    }
+
+    #[test]
+    fn a_macro_backup_of_the_second_model_is_refused() {
+        let source = backup_for_second_model("macro-backup.json");
+        let output = run_without_layout(
+            &[
+                "macro",
+                "restore",
+                source.to_str().unwrap(),
+                "--backup",
+                temporary_path("json").to_str().unwrap(),
+            ],
+            &without_events(second_model_fixture()),
+        );
+        std::fs::remove_file(source).unwrap();
+        assert_refused(
+            &output,
+            "invalid macro backup: device 3434:0950 is not a model verified for writes",
+        );
+    }
+}

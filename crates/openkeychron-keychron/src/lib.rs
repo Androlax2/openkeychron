@@ -5,10 +5,14 @@
 
 mod client;
 mod firmware;
+mod mixed;
+mod perkey;
 mod settings;
 mod wireless;
 
 pub use client::{Features, Keychron, KeychronError, MiscFeatures};
 pub use firmware::{FirmwareVersion, KNOWN_PROTOCOL_VERSION, KeychronProtocol, NotReported};
+pub use mixed::{MixedEffect, MixedRgb};
+pub use perkey::{MatrixSize, PerKeyColor, PerKeyRgb};
 pub use settings::{Debounce, DebounceAlgorithm, SnapClickMode, SnapClickPair};
 pub use wireless::{MIN_BACKLIGHT_OFF_SECONDS, MIN_SLEEP_SECONDS, WirelessTimers};

@@ -1,0 +1,42 @@
+# Hand-written synthetic session. NOT hardware traffic: a 4-slot, 40-byte macro buffer.
+# Reads count, size and buffer: text+tap, empty, down/text/up/delay, unknown action 5.
+format_version = 1
+
+[device]
+name = "synthetic V5 Max ISO macros"
+vendor_id = 13364
+product_id = 2385
+usage_page = 65376
+usage = 97
+
+[[event]]
+kind = "write"
+data = "0c 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "0c 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "0d 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "0d 00 28 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "write"
+data = "0e 00 00 1c 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "0e 00 00 1c 68 65 6c 6c 6f 01 01 28 00 00 01 02 e1 61 01 03 e1 01 04 31 30 30 7c 00 01 05 78 00"
+
+[[event]]
+kind = "write"
+data = "0e 00 1c 0c 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+[[event]]
+kind = "read"
+data = "0e 00 1c 0c 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
