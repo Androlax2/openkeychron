@@ -54,11 +54,18 @@ pub enum CommandError {
     NothingToUndo,
 
     #[error(
-        "the keymap is not as the app left it, so Undo would also take back changes made \
+        "nothing left to redo: Redo puts back only what Undo took back since the app's last \
+         change"
+    )]
+    NothingToRedo,
+
+    /// `write` names the write refused: Undo or Redo.
+    #[error(
+        "the keymap is not as the app left it, so {write} would also take back changes made \
          outside the app; nothing was written. Restore backup still puts back the keymap from \
          before the app's first change"
     )]
-    KeymapChangedOutsideApp,
+    KeymapChangedOutsideApp { write: &'static str },
 
     #[error("no keymap backup yet: the app keeps one when it first changes this keyboard's keymap")]
     NoKeymapBackup,

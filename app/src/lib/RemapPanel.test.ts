@@ -14,8 +14,12 @@ const KC_ESC = 0x0029;
 const AFTER_ESC: EditableKeymap = {
   keymap: withKeycode(KEYMAP, Z_KEY, KC_ESC, "ESC"),
   undoSteps: 1,
+  redoSteps: 0,
   canRestoreBackup: true,
 };
+
+/** AFTER_ESC once Undo took the change back. */
+const UNDONE_ESC: EditableKeymap = { ...EDITABLE_KEYMAP, redoSteps: 1, canRestoreBackup: true };
 
 let mounted: Record<string, unknown> | null = null;
 
@@ -216,6 +220,33 @@ describe("RemapPanel", () => {
     expect(calls).toEqual([["undo_keymap_change", { path: PATH }]]);
   });
 
+  it("offers no redo before an undo", () => {
+    const view = render(AFTER_ESC);
+    expect(button(view, "Redo").disabled).toBe(true);
+  });
+
+  it("says how many changes redo can put back", () => {
+    const view = render({ ...UNDONE_ESC, redoSteps: 2 });
+    expect(button(view, "Redo").textContent?.trim()).toBe("Redo (2)");
+  });
+
+  it("redoes the change the newest undo took back and shows the key read back", async () => {
+    const calls: unknown[] = [];
+    mockIPC((command, payload) => {
+      calls.push([command, payload]);
+      return AFTER_ESC;
+    });
+    const view = render(UNDONE_ESC);
+    button(view, "Redo").click();
+    await vi.waitFor(() => {
+      expect(status(view)).toBe(
+        "Redone, and the whole keymap read back as expected. Read back: layer 0, Z (row 1, " +
+          "column 1) is ESC (0x0029).",
+      );
+    });
+    expect(calls).toEqual([["redo_keymap_change", { path: PATH }]]);
+  });
+
   it("restores the backup from before the first change", async () => {
     const calls: unknown[] = [];
     mockIPC((command, payload) => {
@@ -241,11 +272,13 @@ describe("RemapPanel", () => {
           answer = resolve;
         }),
     );
-    const view = render(AFTER_ESC);
+    const view = render({ ...AFTER_ESC, redoSteps: 1 });
     button(view, "Undo").click();
     flushSync();
-    const busy = ["Apply", "Undo", "Restore backup"].map((name) => button(view, name).disabled);
+    const busy = ["Apply", "Undo", "Redo", "Restore backup"].map(
+      (name) => button(view, name).disabled,
+    );
     answer(EDITABLE_KEYMAP);
-    expect([busy, status(view)]).toEqual([[true, true, true], "Undoing…"]);
+    expect([busy, status(view)]).toEqual([[true, true, true, true], "Undoing…"]);
   });
 });

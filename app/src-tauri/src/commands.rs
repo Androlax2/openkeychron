@@ -1,8 +1,8 @@
 //! The Tauri commands the UI calls. Each command but `list_devices` finds the device by the path
 //! `list_devices` gave, opens it and hands it to a function. The `read_*` commands only read.
-//! `set_keycode`, `undo_keymap_change` and `restore_keymap_backup` write the keymap, through the
-//! guarded write path in `keymap_edit`. Devices come from the `DeviceSource`: the connected
-//! keyboards, or the fixtures of mock mode.
+//! `set_keycode`, `undo_keymap_change`, `redo_keymap_change` and `restore_keymap_backup` write the
+//! keymap, through the guarded write path in `keymap_edit`. Devices come from the `DeviceSource`:
+//! the connected keyboards, or the fixtures of mock mode.
 //!
 //! A new command goes in three places: `generate_handler!` in `main.rs`, `COMMANDS` in
 //! `build.rs` (which generates its `allow-` permission) and `capabilities/default.json`.
@@ -120,6 +120,27 @@ pub fn undo_keymap_change(
     )
 }
 
+/// Writes. Puts back the keymap change the newest undo on the device took back.
+#[tauri::command(async)]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "an async Tauri command takes its arguments by value"
+)]
+pub fn redo_keymap_change(
+    path: String,
+    access: State<'_, DeviceAccess>,
+    source: State<'_, DeviceSource>,
+    histories: State<'_, KeymapHistories>,
+) -> Result<EditableKeymap, CommandError> {
+    let _exclusive = access.exclusive();
+    let (device, transport) = source.open(&path)?;
+    keymap_edit::redo(
+        transport,
+        &device,
+        histories.lock().entry(path).or_default(),
+    )
+}
+
 /// Writes. Puts back the keymap from before the app's first change on the device.
 #[tauri::command(async)]
 #[expect(
@@ -188,6 +209,7 @@ mod tests {
                 "allow-read-settings",
                 "allow-set-keycode",
                 "allow-undo-keymap-change",
+                "allow-redo-keymap-change",
                 "allow-restore-keymap-backup",
             ])
         );

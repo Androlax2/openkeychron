@@ -1,7 +1,8 @@
-//! The keymap writes the UI makes: set one key, undo the last change, and restore the keymap
-//! from before the first change. Each goes through `openkeychron_guard::keymap`, which refuses a
-//! receiver or an unverified model, has this module keep the keymap it replaces in memory before
-//! it sends anything, and reads the whole keymap back. This module only decides which backup to
+//! The keymap writes the UI makes: set one key, undo the last change, redo what an undo took back,
+//! and restore the keymap from before the first change. Each goes through
+//! `openkeychron_guard::keymap`, which refuses a receiver or an unverified model, has this module
+//! keep the keymap it replaces in memory before it sends anything, and reads the whole keymap
+//! back. This module only decides which backup to
 //! keep and which one to write back.
 
 use std::collections::HashMap;
@@ -19,7 +20,7 @@ use crate::keymap::{self, Keymap};
 /// What the write gate's refusal names.
 const WRITES: &str = "keymap writes";
 
-/// A keymap, and what the app can undo on its device.
+/// A keymap, and what the app can undo and redo on its device.
 #[derive(Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
@@ -27,6 +28,8 @@ pub struct EditableKeymap {
     pub keymap: Keymap,
     /// How many changes Undo can take back, one at a time, newest first.
     pub undo_steps: usize,
+    /// How many changes Redo can put back, one at a time, the last one undone first.
+    pub redo_steps: usize,
     /// True once the app holds the keymap from before its first change on this device.
     pub can_restore_backup: bool,
 }
@@ -50,12 +53,12 @@ pub struct KeymapHistory {
     /// The keymap from before each change Undo can take back, oldest first. A restore's backup
     /// goes here too, so Undo takes a restore back.
     undo: Vec<KeymapBackup>,
-    /// The keymap each undo replaced, oldest first. Nothing offers it yet (redo is #148); it is
-    /// kept because every write keeps what it replaces before it is sent (`protocol.md`).
+    /// The keymap each undo replaced, oldest first: what Redo writes back. A redo's backup goes
+    /// to `undo`, so Undo takes a redo back. A new change or a restore empties it.
     undone: Vec<KeymapBackup>,
     /// The keymap the app's last write left the keyboard with, as its read-back verified. `None`
     /// before any write, and after a write that failed part-way left the keymap unknown: Undo
-    /// then writes without comparing, since writing the keymap back is how to recover.
+    /// and Redo then write without comparing, since writing the keymap back is how to recover.
     left_as: Option<KeymapBackup>,
 }
 
@@ -84,10 +87,28 @@ impl KeymapHistory {
         }
     }
 
+    /// Refuses `write` when the keyboard holds a keymap other than the one the app's last write
+    /// left: writing over it would also take back changes made with another program.
+    fn require_left_as_the_app_left_it(
+        &self,
+        replaced: &KeymapBackup,
+        write: &'static str,
+    ) -> Result<(), CommandError> {
+        if self
+            .left_as
+            .as_ref()
+            .is_some_and(|left_as| left_as != replaced)
+        {
+            return Err(CommandError::KeymapChangedOutsideApp { write });
+        }
+        Ok(())
+    }
+
     fn with(&self, keymap: Keymap) -> EditableKeymap {
         EditableKeymap {
             keymap,
             undo_steps: self.undo.len(),
+            redo_steps: self.undone.len(),
             can_restore_backup: self.first_backup.is_some(),
         }
     }
@@ -133,6 +154,7 @@ pub fn set_keycode<T: HidTransport>(
         |previous| {
             history.first_backup.get_or_insert_with(|| previous.clone());
             history.undo.push(previous.clone());
+            history.undone.clear();
             Ok(())
         },
     );
@@ -161,18 +183,37 @@ pub fn undo<T: HidTransport>(
     let mut via = Via::new(transport);
     let outcome =
         guarded_keymap::restore::<_, CommandError>(&mut via, &verified, &previous, |replaced| {
-            if history
-                .left_as
-                .as_ref()
-                .is_some_and(|left_as| left_as != replaced)
-            {
-                return Err(CommandError::KeymapChangedOutsideApp);
-            }
-            history.undone.push(replaced.clone());
+            history.require_left_as_the_app_left_it(replaced, "Undo")?;
+            keep_as_a_step(&mut history.undone, replaced, &previous);
             Ok(())
         });
     history.note(outcome, |_| previous.clone(), "Undo again to retry")?;
     history.undo.pop();
+    read(via.into_transport(), device, history)
+}
+
+/// Writes back the keymap the newest undo replaced. Refused, before anything is sent, when the
+/// keymap is not as the app's last write left it, as `undo` is.
+pub fn redo<T: HidTransport>(
+    transport: T,
+    device: &KeychronDevice,
+    history: &mut KeymapHistory,
+) -> Result<EditableKeymap, CommandError> {
+    let verified = require_write_verified(WRITES, device)?;
+    let undone = history
+        .undone
+        .last()
+        .cloned()
+        .ok_or(CommandError::NothingToRedo)?;
+    let mut via = Via::new(transport);
+    let outcome =
+        guarded_keymap::restore::<_, CommandError>(&mut via, &verified, &undone, |replaced| {
+            history.require_left_as_the_app_left_it(replaced, "Redo")?;
+            keep_as_a_step(&mut history.undo, replaced, &undone);
+            Ok(())
+        });
+    history.note(outcome, |_| undone.clone(), "Redo again to retry")?;
+    history.undone.pop();
     read(via.into_transport(), device, history)
 }
 
@@ -191,6 +232,7 @@ pub fn restore_backup<T: HidTransport>(
     let outcome =
         guarded_keymap::restore::<_, GuardError>(&mut via, &verified, &backup, |replaced| {
             history.undo.push(replaced.clone());
+            history.undone.clear();
             Ok(())
         });
     history.note(
@@ -199,6 +241,17 @@ pub fn restore_backup<T: HidTransport>(
         "Undo puts back the keymap from before the restore, and Restore backup tries again",
     )?;
     read(via.into_transport(), device, history)
+}
+
+/// Keeps the keymap an undo or a redo replaces as a step the other one can write back, unless the
+/// step would put back nothing: the keyboard already holds `wanted`, or the newest step already
+/// holds `replaced`. Both happen when a write failed before it changed anything and is tried
+/// again, or the other button is pressed after it; each would otherwise add a step that writes
+/// the keymap the keyboard has.
+fn keep_as_a_step(steps: &mut Vec<KeymapBackup>, replaced: &KeymapBackup, wanted: &KeymapBackup) {
+    if replaced != wanted && steps.last() != Some(replaced) {
+        steps.push(replaced.clone());
+    }
 }
 
 /// The keymap `guarded_keymap::set_keycode` requires the keyboard to read back: `previous`
@@ -222,7 +275,7 @@ mod tests {
     use openkeychron_mock::{MockKeyboard, MockTransport};
 
     use super::{
-        EditableKeymap, KeyAssignment, KeymapHistory, read, restore_backup, set_keycode, undo,
+        EditableKeymap, KeyAssignment, KeymapHistory, read, redo, restore_backup, set_keycode, undo,
     };
     use crate::error::CommandError;
     use crate::test_support::{Lent, lend, load_fixture, replay, synthetic_path};
@@ -265,6 +318,10 @@ mod tests {
 
         fn undo(&mut self) -> EditableKeymap {
             undo(self.keyboard.connect(), &self.device, &mut self.history).unwrap()
+        }
+
+        fn redo(&mut self) -> EditableKeymap {
+            redo(self.keyboard.connect(), &self.device, &mut self.history).unwrap()
         }
 
         fn restore_backup(&mut self) -> EditableKeymap {
@@ -338,6 +395,96 @@ mod tests {
             error.to_string(),
             "nothing left to undo: Undo takes back only the keymap changes the app made since it \
              started"
+        );
+    }
+
+    #[test]
+    fn an_undo_offers_one_redo_step() {
+        let mut mock = Mock::new();
+        mock.set(0, KC_A);
+        assert_eq!(mock.undo().redo_steps, 1);
+    }
+
+    #[test]
+    fn reading_before_any_undo_offers_no_redo() {
+        let mut mock = Mock::new();
+        mock.set(0, KC_A);
+        assert_eq!(mock.read().redo_steps, 0);
+    }
+
+    #[test]
+    fn redo_puts_back_the_change_the_last_undo_took_back() {
+        let mut mock = Mock::new();
+        mock.set(0, KC_A);
+        mock.set(0, KC_B);
+        mock.undo();
+        let redone = mock.redo();
+        assert_eq!(
+            (keycode_at(&redone, 0), redone.undo_steps, redone.redo_steps),
+            (KC_B, 2, 0)
+        );
+    }
+
+    #[test]
+    fn redoing_every_undone_change_leaves_the_keymap_as_after_the_last_change() {
+        let mut mock = Mock::new();
+        mock.set(0, KC_A);
+        let after = mock.set(1, KC_B).keymap;
+        mock.undo();
+        mock.undo();
+        mock.redo();
+        let redone = mock.redo();
+        assert_eq!((redone.keymap, redone.redo_steps), (after, 0));
+    }
+
+    #[test]
+    fn undo_takes_a_redo_back() {
+        let mut mock = Mock::new();
+        mock.set(0, KC_A);
+        mock.undo();
+        mock.redo();
+        let undone = mock.undo();
+        assert_eq!(
+            (keycode_at(&undone, 0), undone.undo_steps, undone.redo_steps),
+            (0, 0, 1)
+        );
+    }
+
+    #[test]
+    fn a_new_change_after_an_undo_drops_what_redo_could_put_back() {
+        let mut mock = Mock::new();
+        mock.set(0, KC_A);
+        mock.undo();
+        assert_eq!(mock.set(0, KC_B).redo_steps, 0);
+    }
+
+    #[test]
+    fn restoring_the_backup_after_an_undo_drops_what_redo_could_put_back() {
+        let mut mock = Mock::new();
+        mock.set(0, KC_A);
+        mock.set(0, KC_B);
+        mock.undo();
+        assert_eq!(mock.restore_backup().redo_steps, 0);
+    }
+
+    #[test]
+    fn a_refused_write_keeps_what_redo_can_put_back() {
+        let mut mock = Mock::new();
+        mock.set(0, KC_A);
+        mock.undo();
+        set_on_layer_four(&mut mock);
+        assert_eq!(mock.read().redo_steps, 1);
+    }
+
+    #[test]
+    fn refuses_to_redo_before_any_undo() {
+        let mut mock = Mock::new();
+        mock.set(0, KC_A);
+        let error = redo(mock.keyboard.connect(), &mock.device, &mut mock.history).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "nothing left to redo: Redo puts back only what Undo took back since the app's last \
+             change"
         );
     }
 
@@ -446,12 +593,44 @@ mod tests {
         );
     }
 
+    fn redo_after_a_change_outside_the_app(mock: &mut Mock) -> CommandError {
+        mock.set(0, KC_A);
+        mock.undo();
+        set_outside_the_app(mock, KC_C);
+        redo(mock.keyboard.connect(), &mock.device, &mut mock.history).unwrap_err()
+    }
+
+    #[test]
+    fn redo_refuses_to_write_over_a_keymap_changed_outside_the_app() {
+        let error = redo_after_a_change_outside_the_app(&mut Mock::new());
+        assert_eq!(
+            error.to_string(),
+            "the keymap is not as the app left it, so Redo would also take back changes made \
+             outside the app; nothing was written. Restore backup still puts back the keymap \
+             from before the app's first change"
+        );
+    }
+
+    #[test]
+    fn a_refused_redo_leaves_the_keyboard_and_the_redo_step_as_they_were() {
+        let mut mock = Mock::new();
+        redo_after_a_change_outside_the_app(&mut mock);
+        let keymap = mock.read();
+        assert_eq!(
+            (keycode_at(&keymap, 0), keymap.undo_steps, keymap.redo_steps),
+            (KC_C, 0, 1)
+        );
+    }
+
     #[test]
     fn a_refused_undo_leaves_the_keyboard_and_the_undo_step_as_they_were() {
         let mut mock = Mock::new();
         undo_after_a_change_outside_the_app(&mut mock);
         let keymap = mock.read();
-        assert_eq!((keycode_at(&keymap, 0), keymap.undo_steps), (KC_C, 1));
+        assert_eq!(
+            (keycode_at(&keymap, 0), keymap.undo_steps, keymap.redo_steps),
+            (KC_C, 1, 0)
+        );
     }
 
     /// QMK's `quantum/via.h` request IDs, as `openkeychron-via` sends them:
@@ -524,6 +703,100 @@ mod tests {
     }
 
     #[test]
+    fn undoing_again_after_a_failed_undo_offers_one_redo_step() {
+        let mut mock = Mock::new();
+        mock.set(0, KC_A);
+        undo(
+            failing_keymap_buffer(&mock),
+            &mock.device,
+            &mut mock.history,
+        )
+        .unwrap_err();
+        assert_eq!(mock.undo().redo_steps, 1);
+    }
+
+    #[test]
+    fn redo_after_a_failed_undo_offers_one_undo_step() {
+        let mut mock = Mock::new();
+        mock.set(0, KC_A);
+        undo(
+            failing_keymap_buffer(&mock),
+            &mock.device,
+            &mut mock.history,
+        )
+        .unwrap_err();
+        let redone = mock.redo();
+        assert_eq!(
+            (keycode_at(&redone, 0), redone.undo_steps, redone.redo_steps),
+            (KC_A, 1, 0)
+        );
+    }
+
+    #[test]
+    fn a_redo_that_fails_after_its_backup_says_to_redo_again() {
+        let mut mock = Mock::new();
+        mock.set(0, KC_A);
+        mock.undo();
+        let error = redo(
+            failing_keymap_buffer(&mock),
+            &mock.device,
+            &mut mock.history,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "device I/O failed: unplugged; the keyboard may have changed: Redo again to retry"
+        );
+    }
+
+    #[test]
+    fn redoing_again_after_a_failed_redo_puts_the_change_back() {
+        let mut mock = Mock::new();
+        mock.set(0, KC_A);
+        mock.undo();
+        redo(
+            failing_keymap_buffer(&mock),
+            &mock.device,
+            &mut mock.history,
+        )
+        .unwrap_err();
+        let redone = mock.redo();
+        assert_eq!((keycode_at(&redone, 0), redone.redo_steps), (KC_A, 0));
+    }
+
+    #[test]
+    fn redoing_again_after_a_failed_redo_offers_one_undo_step() {
+        let mut mock = Mock::new();
+        mock.set(0, KC_A);
+        mock.undo();
+        redo(
+            failing_keymap_buffer(&mock),
+            &mock.device,
+            &mut mock.history,
+        )
+        .unwrap_err();
+        assert_eq!(mock.redo().undo_steps, 1);
+    }
+
+    #[test]
+    fn undo_after_a_failed_redo_offers_the_redo_again() {
+        let mut mock = Mock::new();
+        mock.set(0, KC_A);
+        mock.undo();
+        redo(
+            failing_keymap_buffer(&mock),
+            &mock.device,
+            &mut mock.history,
+        )
+        .unwrap_err();
+        let undone = mock.undo();
+        assert_eq!(
+            (keycode_at(&undone, 0), undone.undo_steps, undone.redo_steps),
+            (0, 0, 1)
+        );
+    }
+
+    #[test]
     fn a_restore_that_fails_after_its_backup_says_how_to_get_back() {
         let mut mock = Mock::new();
         mock.set(0, KC_A);
@@ -578,9 +851,10 @@ mod tests {
             &KeychronDevice,
             &mut KeymapHistory,
         ) -> Result<EditableKeymap, CommandError>;
-        let writes: [Write; 3] = [
+        let writes: [Write; 4] = [
             |transport, device, history| set_keycode(transport, device, history, assignment(0, 4)),
             |transport, device, history| undo(transport, device, history),
+            |transport, device, history| redo(transport, device, history),
             |transport, device, history| restore_backup(transport, device, history),
         ];
         for write in writes {

@@ -8,6 +8,7 @@ const COMMANDS: &[&str] = &[
     "read_settings",
     "set_keycode",
     "undo_keymap_change",
+    "redo_keymap_change",
     "restore_keymap_backup",
 ];
 
