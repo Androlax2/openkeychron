@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { BASIC_CATEGORIES, buildKeycode, keycodeName, type TickedModifiers } from "./keycode-build";
+import {
+  BASIC_CATEGORIES,
+  buildKeycode,
+  keycodeName,
+  type TickedModifiers,
+  wrappedLayers,
+} from "./keycode-build";
 
 const NONE: TickedModifiers = {
   ctrl: false,
@@ -95,5 +101,15 @@ describe("BASIC_CATEGORIES", () => {
 
   it("keeps the basic keycodes", () => {
     expect(BASIC_CATEGORIES.map((category) => category.name)).toContain("Letters");
+  });
+});
+
+describe("wrappedLayers", () => {
+  it("lists the 16 layers a layer-tap holds", () => {
+    expect(wrappedLayers("layerTap")).toEqual([...Array(16).keys()]);
+  });
+
+  it("lists no layer for a modifier combination", () => {
+    expect(wrappedLayers("modified")).toEqual([]);
   });
 });

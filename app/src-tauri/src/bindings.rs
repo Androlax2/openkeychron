@@ -66,7 +66,7 @@ fn bindings() -> String {
     text
 }
 
-fn optional(value: Option<u8>) -> String {
+fn number_or_null(value: Option<u8>) -> String {
     value.map_or_else(|| "null".to_owned(), |value| value.to_string())
 }
 
@@ -86,7 +86,7 @@ fn wrappers() -> String {
             wrapper
                 .modifiers
                 .map_or_else(|| "null".to_owned(), |modifiers| format!("0x{modifiers:02x}")),
-            optional(wrapper.layer),
+            number_or_null(wrapper.layer),
         )
         .unwrap();
     }
@@ -129,7 +129,7 @@ fn named_only() -> String {
             "  {{ keycode: 0x{:04x}, name: {}, layer: {} }},",
             choice.keycode,
             serde_json::to_string(&choice.name).unwrap(),
-            optional(choice.layer),
+            number_or_null(choice.layer),
         )
         .unwrap();
     }
@@ -150,12 +150,14 @@ fn catalog() -> String {
         )
         .unwrap();
         for choice in category.keycodes {
+            let layer = choice
+                .layer
+                .map_or_else(|| "null".to_owned(), |layer| layer.to_string());
             writeln!(
                 text,
-                "      {{ keycode: 0x{:04x}, name: {}, layer: {} }},",
+                "      {{ keycode: 0x{:04x}, name: {}, layer: {layer} }},",
                 choice.keycode,
-                serde_json::to_string(&choice.name).unwrap(),
-                optional(choice.layer),
+                serde_json::to_string(&choice.name).unwrap()
             )
             .unwrap();
         }

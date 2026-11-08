@@ -77,6 +77,7 @@ impl KeycodeWrapper {
     ///
     /// When the wrapper holds no modifier, or its layer is past 15.
     pub fn name(self) -> Result<WrapperName, KeycodeError> {
+        // Refuses what `wrap` refuses, such as LT(16, …), which no name should suggest exists.
         self.bits()?;
         let (before, after) = match self {
             Self::Modified(modifiers) => {

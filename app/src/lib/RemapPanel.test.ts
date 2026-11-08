@@ -378,6 +378,72 @@ describe("RemapPanel", () => {
       expect(chosenText(view)).toBe("New keycode: none chosen");
     });
 
+    it("forgets the built keycode when switching to another builder", () => {
+      const view = render();
+      chooseKind(view, "Modifiers + key");
+      tick(view, "Ctrl");
+      choose(view, "C");
+      chooseKind(view, "Mod-tap");
+      expect(chosenText(view)).toBe("New keycode: none chosen");
+    });
+
+    function tickConfirmation(view: HTMLElement): void {
+      const confirmation = view.querySelector<HTMLInputElement>(".raw .risky input");
+      if (confirmation === null) {
+        throw new Error("no confirmation for a risky keycode");
+      }
+      confirmation.click();
+      flushSync();
+    }
+
+    it.each([["7c00"], ["7c01"], ["7c03"]])(
+      "warns before mapping a key to a keycode that resets the keyboard (%s)",
+      (text) => {
+        const view = render();
+        chooseKind(view, "Raw value");
+        typeRaw(view, text);
+        expect(view.querySelector(".raw .risky")?.textContent).toContain(
+          "Pressing this key restarts the keyboard, enters its bootloader or erases its settings",
+        );
+      },
+    );
+
+    it("cannot apply a keycode that resets the keyboard until it is confirmed", () => {
+      const view = render();
+      chooseKind(view, "Raw value");
+      typeRaw(view, "0x7c00");
+      expect([button(view, "Apply").disabled, applyHint(view)]).toEqual([
+        true,
+        "Confirm that this key may reset the keyboard.",
+      ]);
+    });
+
+    it("applies a keycode that resets the keyboard once it is confirmed", async () => {
+      const calls: unknown[] = [];
+      mockIPC((command, payload) => {
+        calls.push([command, payload]);
+        return AFTER_ESC;
+      });
+      const view = render();
+      chooseKind(view, "Raw value");
+      typeRaw(view, "0x7c00");
+      tickConfirmation(view);
+      button(view, "Apply").click();
+      await vi.waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls).toEqual([
+        ["set_keycode", { path: PATH, assignment: { ...Z_KEY, keycode: 0x7c00 } }],
+      ]);
+    });
+
+    it("asks again for the confirmation when the raw keycode changes", () => {
+      const view = render();
+      chooseKind(view, "Raw value");
+      typeRaw(view, "0x7c00");
+      tickConfirmation(view);
+      typeRaw(view, "0x7c03");
+      expect(button(view, "Apply").disabled).toBe(true);
+    });
+
     it("names a raw keycode before applying it", () => {
       const view = render();
       chooseKind(view, "Raw value");

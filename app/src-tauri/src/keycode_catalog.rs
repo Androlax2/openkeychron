@@ -54,6 +54,10 @@ pub struct KeycodeWrapperChoice {
 /// A set of modifiers QMK can encode: one or more of Ctrl, Shift, Alt and GUI, all left-hand
 /// or all right-hand.
 #[derive(Debug, PartialEq, Serialize, ts_rs::TS)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "one flag for each modifier checkbox the panel matches a set by"
+)]
 #[serde(rename_all = "camelCase")]
 pub struct ModifierChoice {
     /// QMK's five-bit modifier field.

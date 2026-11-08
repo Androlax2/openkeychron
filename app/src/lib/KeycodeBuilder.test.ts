@@ -139,7 +139,7 @@ describe("KeycodeBuilder", () => {
     const view = render("layerMod");
     chooseLayer(view, 2);
     click(view, "Alt");
-    expect(missing(view)).toBeUndefined();
+    expect(missing(view)).toBe("");
   });
 
   it("offers only the keyboard's layers", () => {

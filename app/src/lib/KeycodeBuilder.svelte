@@ -1,7 +1,7 @@
 <script lang="ts">
 import type { WrapperBuilder } from "./bindings";
 import KeycodePicker from "./KeycodePicker.svelte";
-import { BASIC_CATEGORIES, buildKeycode } from "./keycode-build";
+import { BASIC_CATEGORIES, buildKeycode, wrappedLayers } from "./keycode-build";
 
 let {
   builder,
@@ -14,9 +14,6 @@ let {
   /** Called with the built keycode each time a part changes; null while a part is missing. */
   onbuild: (keycode: number | null) => void;
 } = $props();
-
-// LT and LM keep the layer in four bits.
-const LAYERS_A_WRAPPER_HOLDS = 16;
 
 const DESCRIPTIONS: Record<WrapperBuilder, string> = {
   modified: "Sends the key with the modifiers held, such as LCTL(C) for Ctrl+C.",
@@ -37,9 +34,7 @@ let key: number | null = $state(null);
 const usesModifiers = $derived(builder !== "layerTap");
 const usesLayer = $derived(builder === "layerTap" || builder === "layerMod");
 const usesKey = $derived(builder !== "layerMod");
-const layers = $derived(
-  Array.from({ length: Math.min(layerCount, LAYERS_A_WRAPPER_HOLDS) }, (_, index) => index),
-);
+const layers = $derived(wrappedLayers(builder).filter((layer) => layer < layerCount));
 const built = $derived(
   buildKeycode(builder, {
     modifiers: { ctrl, shift, alt, gui, rightHand: hand === "right" },
@@ -107,9 +102,7 @@ $effect(() => {
     />
   {/if}
 
-  {#if missing !== null}
-    <p class="missing">{missing}</p>
-  {/if}
+  <p class="missing" aria-live="polite">{missing ?? ""}</p>
 </div>
 
 <style>

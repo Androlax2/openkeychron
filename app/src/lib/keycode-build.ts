@@ -60,6 +60,13 @@ export function buildKeycode(builder: WrapperBuilder, parts: KeycodeParts): numb
   return wrapper === undefined || inner === null ? null : wrapper.keycode | inner;
 }
 
+/** The layers `builder` has a wrapper for, lowest first; none for a modifier builder. */
+export function wrappedLayers(builder: WrapperBuilder): number[] {
+  return KEYCODE_WRAPPERS.flatMap((wrapper) =>
+    wrapper.builder === builder && wrapper.layer !== null ? [wrapper.layer] : [],
+  );
+}
+
 type InnerPart = { value: number; name: string };
 
 function innerParts(wrapper: KeycodeWrapperChoice): InnerPart[] {
@@ -70,13 +77,8 @@ function innerParts(wrapper: KeycodeWrapperChoice): InnerPart[] {
       );
 }
 
-let names: Map<number, string> | null = null;
-
-/** Every keycode the app can name before the keyboard reads it back, built on first use. */
+/** Every keycode the app can name before the keyboard reads it back. */
 function knownNames(): Map<number, string> {
-  if (names !== null) {
-    return names;
-  }
   const known = new Map<number, string>();
   for (const choice of KEYCODE_CATEGORIES.flatMap((category) => category.keycodes)) {
     known.set(choice.keycode, choice.name);
@@ -89,14 +91,15 @@ function knownNames(): Map<number, string> {
       known.set(wrapper.keycode | inner.value, `${wrapper.before}${inner.name}${wrapper.after}`);
     }
   }
-  names = known;
   return known;
 }
+
+const KNOWN_NAMES = knownNames();
 
 /**
  * QMK's name for `keycode`, as `Keycode::name` gives it; null when QMK names it not. A Keychron
  * custom keycode is named by the connected model only once the keyboard reads it back.
  */
 export function keycodeName(keycode: number): string | null {
-  return knownNames().get(keycode) ?? null;
+  return KNOWN_NAMES.get(keycode) ?? null;
 }

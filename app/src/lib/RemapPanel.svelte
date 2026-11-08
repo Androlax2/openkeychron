@@ -29,21 +29,26 @@ let {
 } = $props();
 
 type Outcome = { failed: boolean; text: string };
-type KeycodeKind = "list" | WrapperBuilder | "raw";
+type PickerMode = "list" | WrapperBuilder | "raw";
 
-const KEYCODE_KINDS: { kind: KeycodeKind; label: string }[] = [
-  { kind: "list", label: "Keycode" },
-  { kind: "modified", label: "Modifiers + key" },
-  { kind: "modTap", label: "Mod-tap" },
-  { kind: "layerTap", label: "Layer-tap" },
-  { kind: "layerMod", label: "Layer + modifiers" },
-  { kind: "raw", label: "Raw value" },
+const PICKER_MODES: { mode: PickerMode; label: string }[] = [
+  { mode: "list", label: "Keycode" },
+  { mode: "modified", label: "Modifiers + key" },
+  { mode: "modTap", label: "Mod-tap" },
+  { mode: "layerTap", label: "Layer-tap" },
+  { mode: "layerMod", label: "Layer + modifiers" },
+  { mode: "raw", label: "Raw value" },
 ];
 
+// Only a raw value reaches these. Pressing a key mapped to one leaves the keyboard unusable
+// until it restarts or is set up again, so the panel asks first (protocol.md).
+const RESETTING_KEYCODE_NAMES = new Set(["QK_BOOT", "QK_RBT", "EE_CLR"]);
+
 const id = $props.id();
-let kind: KeycodeKind = $state("list");
+let mode: PickerMode = $state("list");
 let chosen: number | null = $state(null);
 let rawText = $state("");
+let isResetConfirmed = $state(false);
 /** What the write in progress is doing, such as "Applying…"; null when none is. */
 let pending: string | null = $state(null);
 let outcome: Outcome | null = $state(null);
@@ -54,9 +59,11 @@ const selectedKeyText = $derived(
     ? "No key selected."
     : `Layer ${selection.layer}, ${describeKey(selectedKey)}: ${describeKeycode(selectedKey)}`,
 );
+const chosenName = $derived(chosen === null ? null : keycodeName(chosen));
 const chosenText = $derived(
-  chosen === null ? "none chosen" : describeKeycode({ keycode: chosen, name: keycodeName(chosen) }),
+  chosen === null ? "none chosen" : describeKeycode({ keycode: chosen, name: chosenName }),
 );
+const isChosenResetting = $derived(chosenName !== null && RESETTING_KEYCODE_NAMES.has(chosenName));
 const isRawUnreadable = $derived(rawText.trim() !== "" && parseRawKeycode(rawText) === null);
 const applyHint = $derived(
   selectedKey === null
@@ -65,13 +72,16 @@ const applyHint = $derived(
       ? "Choose a keycode for it."
       : chosen === selectedKey.keycode
         ? "The key already has this keycode."
-        : null,
+        : isChosenResetting && !isResetConfirmed
+          ? "Confirm that this key may reset the keyboard."
+          : null,
 );
 
-function chooseKind(next: KeycodeKind): void {
-  kind = next;
+function chooseMode(next: PickerMode): void {
+  mode = next;
   chosen = null;
   rawText = "";
+  isResetConfirmed = false;
 }
 
 function keyAt(keymap: EditableKeymap, at: KeySelection): Key | null {
@@ -161,21 +171,21 @@ function restoreBackup(): void {
 
   <fieldset class="kind">
     <legend>Kind of keycode</legend>
-    {#each KEYCODE_KINDS as option (option.kind)}
+    {#each PICKER_MODES as option (option.mode)}
       <label>
         <input
           type="radio"
-          name="{id}-kind"
-          value={option.kind}
-          checked={option.kind === kind}
-          onchange={() => chooseKind(option.kind)}
+          name="{id}-mode"
+          value={option.mode}
+          checked={option.mode === mode}
+          onchange={() => chooseMode(option.mode)}
         >
         {option.label}
       </label>
     {/each}
   </fieldset>
 
-  {#if kind === "list"}
+  {#if mode === "list"}
     <KeycodePicker
       categories={KEYCODE_CATEGORIES}
       layerCount={editable.keymap.layerCount}
@@ -184,7 +194,7 @@ function restoreBackup(): void {
         chosen = keycode;
       }}
     />
-  {:else if kind === "raw"}
+  {:else if mode === "raw"}
     <div class="raw">
       <label for="{id}-raw">Raw keycode, in hexadecimal</label>
       <input
@@ -198,6 +208,7 @@ function restoreBackup(): void {
         bind:value={rawText}
         oninput={(event) => {
           chosen = parseRawKeycode(event.currentTarget.value);
+          isResetConfirmed = false;
         }}
       >
       {#if isRawUnreadable}
@@ -205,15 +216,30 @@ function restoreBackup(): void {
           Enter one to four hexadecimal digits, such as 0x0106.
         </p>
       {/if}
+      {#if isChosenResetting}
+        <div class="risky">
+          <p>
+            Pressing this key restarts the keyboard, enters its bootloader or erases its settings,
+            and the keyboard stops typing until it starts again.
+          </p>
+          <label>
+            <input type="checkbox" bind:checked={isResetConfirmed}>
+            Map the key to {chosenName} anyway
+          </label>
+        </div>
+      {/if}
     </div>
   {:else}
-    <KeycodeBuilder
-      builder={kind}
-      layerCount={editable.keymap.layerCount}
-      onbuild={(keycode) => {
-        chosen = keycode;
-      }}
-    />
+    <!-- A new builder for each mode, so a mode change starts from no parts. -->
+    {#key mode}
+      <KeycodeBuilder
+        builder={mode}
+        layerCount={editable.keymap.layerCount}
+        onbuild={(keycode) => {
+          chosen = keycode;
+        }}
+      />
+    {/key}
   {/if}
 
   <p class="chosen">New keycode: {chosenText}</p>
