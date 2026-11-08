@@ -5,8 +5,6 @@
 //! OPENKEYCHRON_WRITE_BINDINGS=1 cargo test -p openkeychron-app bindings
 //! ```
 
-use std::path::Path;
-
 use ts_rs::{Config, TS};
 
 use crate::device::Device;
@@ -49,18 +47,25 @@ fn bindings() -> String {
     text
 }
 
-#[test]
-fn the_committed_typescript_bindings_match_the_rust_types() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/lib/bindings.ts");
-    let generated = bindings();
-    if std::env::var_os("OPENKEYCHRON_WRITE_BINDINGS").is_some() {
-        std::fs::write(&path, &generated).unwrap();
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::bindings;
+
+    #[test]
+    fn the_committed_typescript_bindings_match_the_rust_types() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/lib/bindings.ts");
+        let generated = bindings();
+        if std::env::var_os("OPENKEYCHRON_WRITE_BINDINGS").is_some() {
+            std::fs::write(&path, &generated).unwrap();
+        }
+        let committed = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(
+            committed == generated,
+            "{} is out of date; regenerate it with \
+             `OPENKEYCHRON_WRITE_BINDINGS=1 cargo test -p openkeychron-app bindings`",
+            path.display()
+        );
     }
-    let committed = std::fs::read_to_string(&path).unwrap_or_default();
-    assert!(
-        committed == generated,
-        "{} is out of date; regenerate it with \
-         `OPENKEYCHRON_WRITE_BINDINGS=1 cargo test -p openkeychron-app bindings`",
-        path.display()
-    );
 }

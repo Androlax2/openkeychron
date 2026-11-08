@@ -1,4 +1,4 @@
-//! `settings`: debounce, Snap Click and wireless timers. Only reads.
+//! What `read_settings` returns: debounce, Snap Click and wireless timers. Only reads.
 
 use openkeychron_hid::HidTransport;
 use openkeychron_keychron::{self as keychron, Keychron};

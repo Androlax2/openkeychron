@@ -1,4 +1,4 @@
-//! `device_info`: the VIA and Keychron firmware values. Only reads.
+//! What `read_info` returns: the VIA and Keychron firmware values. Only reads.
 
 use openkeychron_hid::{HidTransport, KeychronDevice};
 use openkeychron_keychron::{KNOWN_PROTOCOL_VERSION, Keychron, NotReported};
@@ -123,6 +123,22 @@ mod tests {
             error.to_string(),
             "no input report arrived before the timeout. Through a receiver this is \
              inconclusive; try the keyboard on a USB cable (see docs/protocol/keychron-link.md)"
+        );
+        assert_eq!(replay.finish(), vec![]);
+    }
+
+    #[test]
+    fn a_timeout_over_a_cable_gives_no_receiver_hint() {
+        let mut fixture = load_fixture("cli-info.toml");
+        fixture.device.product_id = 0x0951;
+        fixture.events.truncate(2);
+        fixture.events[1] = Event::ReadTimeout;
+        let mut replay = replay_fixture(fixture);
+        assert!(!replay.device.is_receiver);
+        let error = read(lend(&mut replay.transport), &replay.device).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "no input report arrived before the timeout"
         );
         assert_eq!(replay.finish(), vec![]);
     }

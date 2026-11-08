@@ -1,4 +1,4 @@
-//! `keymap`: every layer's raw keycodes on the matrix grid, with the built-in physical legends.
+//! What `read_keymap` returns: every layer's raw keycodes on the matrix grid, with the built-in physical legends.
 //! Only reads.
 
 use openkeychron_hid::{HidTransport, KeychronDevice};

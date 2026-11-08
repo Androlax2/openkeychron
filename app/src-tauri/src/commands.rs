@@ -1,5 +1,9 @@
-//! The Tauri commands the UI calls. Each finds the device by the path `list_devices` gave,
-//! opens it and hands it to a read function. None of them writes to the keyboard.
+//! The Tauri commands the UI calls. Each `read_*` command finds the device by the path
+//! `list_devices` gave, opens it and hands it to a read function. None of them writes to the
+//! keyboard.
+//!
+//! A new command goes in three places: `generate_handler!` in `main.rs`, `COMMANDS` in
+//! `build.rs` (which generates its `allow-` permission) and `capabilities/default.json`.
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 

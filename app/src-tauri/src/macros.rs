@@ -1,4 +1,4 @@
-//! `macros`: every macro slot, decoded into actions where the bytes allow it. Only reads.
+//! What `read_macros` returns: every macro slot, decoded into actions where the bytes allow it. Only reads.
 
 use openkeychron_hid::{HidTransport, KeychronDevice};
 use openkeychron_via::{MacroAction, Via, decode_macro, slots};
@@ -145,10 +145,14 @@ mod tests {
         let mut replay = replay("cli-macro-list.toml");
         let list = read(lend(&mut replay.transport), &replay.device).unwrap();
         assert_eq!(list.macros[3].bytes, [1, 5, 120]);
-        let MacroContent::Unreadable { error } = &list.macros[3].content else {
-            panic!("slot 3 decoded: {:?}", list.macros[3].content);
-        };
-        assert!(error.contains("unknown code 5"), "{error}");
+        assert_eq!(
+            list.macros[3].content,
+            MacroContent::Unreadable {
+                error: "macro action at offset 0 has unknown code 5 (known: 1 tap, 2 down, 3 up, \
+                        4 delay)"
+                    .to_owned()
+            }
+        );
         assert_eq!(replay.finish(), vec![]);
     }
 }
