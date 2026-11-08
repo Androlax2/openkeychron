@@ -12,7 +12,15 @@ publish = false
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+openkeychron-hid.workspace = true
+openkeychron-keychron = { path = "../../crates/openkeychron-keychron", version = "0.0.0" }
+openkeychron-via = { path = "../../crates/openkeychron-via", version = "0.0.0" }
+serde.workspace = true
 tauri = { version = "2", features = [] }
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true
