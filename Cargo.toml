@@ -4,7 +4,10 @@ members = [
     "crates/openkeychron-hid",
     "crates/openkeychron-via",
     "crates/openkeychron-keychron",
+    "crates/openkeychron-guard",
+    "crates/openkeychron-mock",
     "crates/openkeychron-cli",
+    "app/src-tauri",
 ]
 
 [workspace.package]
@@ -19,6 +22,7 @@ description = "Native, local-first alternative to Keychron Launcher"
 [workspace.dependencies]
 openkeychron-hid = { path = "crates/openkeychron-hid", version = "0.0.0" }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 thiserror = "2"
 toml = "1"
 

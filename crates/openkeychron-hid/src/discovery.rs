@@ -1,12 +1,12 @@
 //! Finding Keychron devices and opening their VIA raw HID interface through `hidapi`.
 
 use std::io::ErrorKind;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use thiserror::Error;
 
-use crate::{HidTransport, TransportError};
+use crate::{DeviceIdentity, HidTransport, TransportError};
 
 pub const KEYCHRON_VENDOR_ID: u16 = 0x3434;
 
@@ -78,12 +78,61 @@ pub fn keychron_via_interfaces(
         })
         .map(|interface| KeychronDevice {
             is_receiver: RECEIVER_PRODUCT_IDS.contains(&interface.product_id),
-            name: interface.name,
+            name: interface.name.as_deref().and_then(clean_product_name),
             vendor_id: interface.vendor_id,
             product_id: interface.product_id,
             path: interface.path,
         })
         .collect()
+}
+
+/// Some firmware pads the USB product string (the Keychron Link reports `"Keychron Link "`).
+/// A name with nothing left after trimming is no name, so callers show their own placeholder.
+fn clean_product_name(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+}
+
+/// A fixture, or a mock keyboard, was recorded from something other than a Keychron VIA
+/// interface, so replaying it would not stand in for a keyboard.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error(
+    "{} was not recorded from a Keychron VIA interface ({vendor_id:04x}:{product_id:04x}, usage \
+     page 0x{usage_page:04x}, usage 0x{usage:02x})",
+    path.display()
+)]
+pub struct NotKeychronVia {
+    pub path: PathBuf,
+    pub vendor_id: u16,
+    pub product_id: u16,
+    pub usage_page: u16,
+    pub usage: u16,
+}
+
+/// The device a fixture at `path` was recorded from, listed as [`list_keychron_devices`] would
+/// have shown it, under the path `fixture:<path>`. Anything other than a Keychron VIA interface
+/// is refused rather than replayed.
+pub fn fixture_device(
+    identity: &DeviceIdentity,
+    path: &Path,
+) -> Result<KeychronDevice, NotKeychronVia> {
+    let interface = HidInterface {
+        name: Some(identity.name.clone()),
+        vendor_id: identity.vendor_id,
+        product_id: identity.product_id,
+        usage_page: identity.usage_page,
+        usage: identity.usage,
+        path: format!("fixture:{}", path.display()),
+    };
+    keychron_via_interfaces([interface])
+        .pop()
+        .ok_or_else(|| NotKeychronVia {
+            path: path.to_owned(),
+            vendor_id: identity.vendor_id,
+            product_id: identity.product_id,
+            usage_page: identity.usage_page,
+            usage: identity.usage,
+        })
 }
 
 /// Lists the VIA interfaces of connected Keychron devices. Reads the OS device list only;
@@ -191,7 +240,12 @@ fn with_report_id(report: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{HidInterface, KeychronDevice, keychron_via_interfaces, with_report_id};
+    use std::path::Path;
+
+    use super::{
+        HidInterface, KeychronDevice, fixture_device, keychron_via_interfaces, with_report_id,
+    };
+    use crate::DeviceIdentity;
 
     fn interface(vendor_id: u16, product_id: u16, usage_page: u16, usage: u16) -> HidInterface {
         HidInterface {
@@ -209,6 +263,47 @@ mod tests {
         let found = keychron_via_interfaces([interface(0x3434, 0x0951, 0xff60, 0x61)]);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].product_id, 0x0951);
+    }
+
+    fn named_interface(name: Option<&str>) -> HidInterface {
+        HidInterface {
+            name: name.map(str::to_owned),
+            ..interface(0x3434, 0xd030, 0xff60, 0x61)
+        }
+    }
+
+    #[test]
+    fn trims_whitespace_around_the_product_name() {
+        let found = keychron_via_interfaces([named_interface(Some("  Keychron Link \t"))]);
+        assert_eq!(found[0].name.as_deref(), Some("Keychron Link"));
+    }
+
+    #[test]
+    fn keeps_whitespace_inside_the_product_name() {
+        let found = keychron_via_interfaces([named_interface(Some("Keychron  V5 Max"))]);
+        assert_eq!(found[0].name.as_deref(), Some("Keychron  V5 Max"));
+    }
+
+    #[test]
+    fn turns_an_empty_product_name_into_none() {
+        let found = keychron_via_interfaces([named_interface(Some(""))]);
+        assert_eq!(found[0].name, None);
+    }
+
+    #[test]
+    fn turns_a_whitespace_only_product_name_into_none() {
+        let found = keychron_via_interfaces([named_interface(Some(" \t\n "))]);
+        assert_eq!(found[0].name, None);
+    }
+
+    #[test]
+    fn trims_the_product_name_of_a_fixture_device() {
+        let identity = DeviceIdentity {
+            name: "Keychron Link ".to_owned(),
+            ..identity(0x3434, 0xff60, 0x61)
+        };
+        let device = fixture_device(&identity, Path::new("link.toml")).unwrap();
+        assert_eq!(device.name.as_deref(), Some("Keychron Link"));
     }
 
     #[test]
@@ -263,5 +358,53 @@ mod tests {
     #[test]
     fn prefixes_report_id_zero() {
         assert_eq!(with_report_id(&[0x01, 0x02]), vec![0x00, 0x01, 0x02]);
+    }
+
+    fn identity(vendor_id: u16, usage_page: u16, usage: u16) -> DeviceIdentity {
+        DeviceIdentity {
+            name: "Keychron V5 Max".to_owned(),
+            vendor_id,
+            product_id: 0x0951,
+            usage_page,
+            usage,
+        }
+    }
+
+    #[test]
+    fn lists_a_fixture_device_under_its_fixture_path() {
+        let device =
+            fixture_device(&identity(0x3434, 0xff60, 0x61), Path::new("a/cable.toml")).unwrap();
+        assert_eq!(
+            device,
+            KeychronDevice {
+                name: Some("Keychron V5 Max".to_owned()),
+                vendor_id: 0x3434,
+                product_id: 0x0951,
+                path: "fixture:a/cable.toml".to_owned(),
+                is_receiver: false,
+            }
+        );
+    }
+
+    #[test]
+    fn refuses_a_fixture_device_from_another_vendor() {
+        let error =
+            fixture_device(&identity(0x1234, 0xff60, 0x61), Path::new("a/other.toml")).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "a/other.toml was not recorded from a Keychron VIA interface (1234:0951, usage page \
+             0xff60, usage 0x61)"
+        );
+    }
+
+    #[test]
+    fn refuses_a_fixture_device_that_is_not_the_via_interface() {
+        let error =
+            fixture_device(&identity(0x3434, 0x0001, 0x06), Path::new("a/keys.toml")).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "a/keys.toml was not recorded from a Keychron VIA interface (3434:0951, usage page \
+             0x0001, usage 0x06)"
+        );
     }
 }

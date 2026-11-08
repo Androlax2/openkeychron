@@ -1,0 +1,29 @@
+[package]
+name = "openkeychron-app"
+description = "openkeychron desktop app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+openkeychron-hid.workspace = true
+openkeychron-keychron = { path = "../../crates/openkeychron-keychron", version = "0.0.0" }
+openkeychron-mock = { path = "../../crates/openkeychron-mock", version = "0.0.0" }
+openkeychron-via = { path = "../../crates/openkeychron-via", version = "0.0.0" }
+serde.workspace = true
+tauri = { version = "2", features = [] }
+thiserror.workspace = true
+
+[dev-dependencies]
+openkeychron-guard = { path = "../../crates/openkeychron-guard", version = "0.0.0" }
+serde_json.workspace = true
+ts-rs = "=12.0.1"
+
+[lints]
+workspace = true

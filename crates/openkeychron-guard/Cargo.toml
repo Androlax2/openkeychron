@@ -1,0 +1,22 @@
+[package]
+name = "openkeychron-guard"
+description = "The guarded write path: write-verified gate, backup before write, read-back"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+openkeychron-hid.workspace = true
+openkeychron-keychron = { path = "../openkeychron-keychron", version = "0.0.0" }
+openkeychron-via = { path = "../openkeychron-via", version = "0.0.0" }
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

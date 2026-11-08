@@ -3,10 +3,11 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use openkeychron_guard::GuardError;
 use openkeychron_hid::{
-    DeviceIdentity, Event, Fixture, FixtureError, HidInterface, HidTransport, HidapiTransport,
-    KeychronDevice, RecordingTransport, ReplayTransport, TransportError, VIA_USAGE, VIA_USAGE_PAGE,
-    keychron_via_interfaces,
+    DeviceIdentity, Event, Fixture, FixtureError, HidTransport, HidapiTransport, KeychronDevice,
+    NotKeychronVia, RecordingTransport, ReplayTransport, TransportError, VIA_USAGE, VIA_USAGE_PAGE,
+    fixture_device,
 };
 use openkeychron_via::ViaError;
 
@@ -58,6 +59,12 @@ impl From<FixtureError> for SessionError {
     }
 }
 
+impl From<NotKeychronVia> for SessionError {
+    fn from(error: NotKeychronVia) -> Self {
+        Self::Usage(error.to_string())
+    }
+}
+
 impl From<openkeychron_hid::DiscoveryError> for SessionError {
     fn from(error: openkeychron_hid::DiscoveryError) -> Self {
         Self::Discovery(error)
@@ -67,6 +74,27 @@ impl From<openkeychron_hid::DiscoveryError> for SessionError {
 impl From<openkeychron_keychron::KeychronError> for SessionError {
     fn from(error: openkeychron_keychron::KeychronError) -> Self {
         Self::Keychron(error.to_string())
+    }
+}
+
+impl From<GuardError> for SessionError {
+    fn from(error: GuardError) -> Self {
+        match error {
+            // The gate refuses receivers before any guarded write, so no receiver caveat applies.
+            GuardError::Via(error) => Self::via(&error, false),
+            GuardError::Keychron(error) => Self::from(error),
+            // Device failures after a write was sent, as `rgb key` has always reported them.
+            rolled_back @ (GuardError::PerKeyColorRolledBack { .. }
+            | GuardError::PerKeyColorRollbackFailed { .. }) => {
+                Self::Keychron(rolled_back.to_string())
+            }
+            GuardError::MacrosDisabled => Self::Usage(
+                "the macro buffer's last byte is not 0, so an earlier write did not finish and \
+                 its content is unknown; run `openkeychron macro restore` with a backup first"
+                    .to_owned(),
+            ),
+            refusal => Self::Usage(refusal.to_string()),
+        }
     }
 }
 
@@ -95,7 +123,7 @@ impl SessionError {
 /// Lists devices: the fixture's device when replaying, otherwise the connected ones.
 pub fn list(fixture: Option<&Path>) -> Result<Vec<KeychronDevice>, SessionError> {
     match fixture {
-        Some(path) => Ok(vec![fixture_device(&Fixture::load(path)?, path)?]),
+        Some(path) => Ok(vec![fixture_device(&Fixture::load(path)?.device, path)?]),
         None => Ok(openkeychron_hid::list_keychron_devices()?),
     }
 }
@@ -127,7 +155,7 @@ impl Session {
         if let Some(path) = fixture {
             let fixture = Fixture::load(path)?;
             return Ok(Self {
-                device: fixture_device(&fixture, path)?,
+                device: fixture_device(&fixture.device, path)?,
                 link: Link::Replay(ReplayTransport::new(fixture)),
                 reply_timeout: None,
             });
@@ -262,34 +290,6 @@ fn listed_paths(devices: &[KeychronDevice]) -> String {
         .map(|device| device.path.as_str())
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-/// The device a fixture was recorded from, as `list` would have shown it. A fixture from
-/// anything other than a Keychron VIA interface is refused rather than replayed.
-fn fixture_device(fixture: &Fixture, path: &Path) -> Result<KeychronDevice, SessionError> {
-    let identity = &fixture.device;
-    let interface = HidInterface {
-        name: Some(identity.name.clone()),
-        vendor_id: identity.vendor_id,
-        product_id: identity.product_id,
-        usage_page: identity.usage_page,
-        usage: identity.usage,
-        path: format!("fixture:{}", path.display()),
-    };
-    keychron_via_interfaces([interface])
-        .into_iter()
-        .next()
-        .ok_or_else(|| {
-            SessionError::Usage(format!(
-                "{} was not recorded from a Keychron VIA interface ({:04x}:{:04x}, usage page \
-             0x{:04x}, usage 0x{:02x})",
-                path.display(),
-                identity.vendor_id,
-                identity.product_id,
-                identity.usage_page,
-                identity.usage
-            ))
-        })
 }
 
 #[cfg(test)]
