@@ -33,9 +33,14 @@ impl From<KeychronDevice> for Device {
 
 /// The listed device at `path`. A path that is not listed is refused rather than opened.
 pub fn find(mut devices: Vec<KeychronDevice>, path: &str) -> Result<KeychronDevice, CommandError> {
-    if let Some(index) = devices.iter().position(|device| device.path == path) {
-        return Ok(devices.swap_remove(index));
+    match devices.iter().position(|device| device.path == path) {
+        Some(index) => Ok(devices.swap_remove(index)),
+        None => Err(not_connected(&devices, path)),
     }
+}
+
+/// The refusal for a `path` that is none of `devices`, naming the ones that are listed.
+pub fn not_connected(devices: &[KeychronDevice], path: &str) -> CommandError {
     let connected = if devices.is_empty() {
         "none".to_owned()
     } else {
@@ -45,10 +50,10 @@ pub fn find(mut devices: Vec<KeychronDevice>, path: &str) -> Result<KeychronDevi
             .collect::<Vec<_>>()
             .join(", ")
     };
-    Err(CommandError::NotConnected {
+    CommandError::NotConnected {
         path: path.to_owned(),
         connected,
-    })
+    }
 }
 
 #[cfg(test)]
