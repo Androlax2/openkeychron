@@ -16,8 +16,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use openkeychron_hid::{
-    DeviceIdentity, Fixture, FixtureError, HidInterface, HidTransport, HidapiTransport,
-    KeychronDevice, ReplayTransport, TransportError, keychron_via_interfaces,
+    Fixture, FixtureError, HidTransport, HidapiTransport, KeychronDevice, NotKeychronVia,
+    ReplayTransport, TransportError, fixture_device,
 };
 use openkeychron_mock::{MockError, MockKeyboard, MockTransport};
 
@@ -81,17 +81,8 @@ pub enum SourceError {
     #[error("{path}: {source}")]
     Mock { path: PathBuf, source: MockError },
 
-    #[error(
-        "{path} was not recorded from a Keychron VIA interface ({vendor_id:04x}:{product_id:04x}, \
-         usage page 0x{usage_page:04x}, usage 0x{usage:02x})"
-    )]
-    NotKeychronVia {
-        path: PathBuf,
-        vendor_id: u16,
-        product_id: u16,
-        usage_page: u16,
-        usage: u16,
-    },
+    #[error(transparent)]
+    NotKeychronVia(#[from] NotKeychronVia),
 }
 
 /// What a command reads and writes through: a keyboard, a fixture's in-memory replay, or a mock
@@ -209,7 +200,7 @@ impl FixtureDevice {
                 path: path.to_owned(),
                 source,
             })?;
-            let device = listed_device(path, keyboard.identity())?;
+            let device = fixture_device(keyboard.identity(), path)?;
             return Ok(Self {
                 device,
                 answers: Answers::Mock(keyboard),
@@ -223,33 +214,12 @@ impl FixtureDevice {
                 source: other,
             },
         })?;
-        let device = listed_device(path, &fixture.device)?;
+        let device = fixture_device(&fixture.device, path)?;
         Ok(Self {
             device,
             answers: Answers::Replay(fixture),
         })
     }
-}
-
-/// The device the file at `path` is listed as: the Keychron VIA interface `identity` names.
-fn listed_device(path: &Path, identity: &DeviceIdentity) -> Result<KeychronDevice, SourceError> {
-    let interface = HidInterface {
-        name: Some(identity.name.clone()),
-        vendor_id: identity.vendor_id,
-        product_id: identity.product_id,
-        usage_page: identity.usage_page,
-        usage: identity.usage,
-        path: format!("fixture:{}", path.display()),
-    };
-    keychron_via_interfaces([interface])
-        .pop()
-        .ok_or_else(|| SourceError::NotKeychronVia {
-            path: path.to_owned(),
-            vendor_id: identity.vendor_id,
-            product_id: identity.product_id,
-            usage_page: identity.usage_page,
-            usage: identity.usage,
-        })
 }
 
 #[cfg(test)]
