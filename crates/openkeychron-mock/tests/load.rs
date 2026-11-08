@@ -52,6 +52,21 @@ mod tests {
     }
 
     #[test]
+    fn refuses_another_format_version_before_reading_the_rest() {
+        let path = edited(
+            "version-first",
+            "format_version = 1",
+            "format_version = 2\nseed = \"later\"",
+        );
+        let error = MockKeyboard::load(&path).unwrap_err();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            error.to_string(),
+            "mock keyboard format_version 2 is not supported (this build reads 1)"
+        );
+    }
+
+    #[test]
     fn refuses_a_model_without_a_built_in_layout() {
         let path = edited("layout", "product_id = 2385", "product_id = 2384");
         let error = MockKeyboard::load(&path).unwrap_err();

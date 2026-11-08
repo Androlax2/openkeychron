@@ -9,10 +9,11 @@ mod tests {
     use openkeychron_via::{Keycode, Via};
 
     const MATRIX_KEYS: usize = 4 * 6 * 19;
-    /// Row 2, column 1: the key labelled `Q` on the FR ISO layout.
+    /// Row 2, column 1: the key labelled `A` on the FR ISO layout.
     const ROW: u8 = 2;
     const COLUMN: u8 = 1;
     const KC_A: u16 = 0x0004;
+    const KC_B: u16 = 0x0005;
 
     fn v5_max_iso() -> (MockKeyboard, WriteVerified) {
         let keyboard = MockKeyboard::new(DeviceIdentity {
@@ -59,6 +60,10 @@ mod tests {
     #[test]
     fn restoring_the_backup_of_a_guarded_write_undoes_it() {
         let (keyboard, verified) = v5_max_iso();
+        // A non-zero key, so a restore that wrote the zero seed back would not pass.
+        Via::new(keyboard.connect())
+            .write_keycode(0, ROW, COLUMN, Keycode::from(KC_B))
+            .unwrap();
         let before = keymap(&keyboard);
         let backup = set_keycode::<_, GuardError>(
             &mut Via::new(keyboard.connect()),

@@ -37,6 +37,9 @@ const SUCCESS: u8 = 0;
 const FAILURE: u8 = 1;
 /// The firmware's algorithms are 0 to 6 (`common/debounce/keychron_debounce.h`).
 const DEBOUNCE_ALGORITHMS: u8 = 7;
+/// Algorithm 5, whose time the firmware caps at 127 ms (`docs/protocol/keychron.md`).
+const ASYMMETRIC: u8 = 5;
+const ASYMMETRIC_MAX_MS: u8 = 127;
 /// Snap Click modes are 0 to 5 (`common/snap_click/snap_click.c`).
 const SNAP_CLICK_MODES: u8 = 6;
 const SNAP_CLICK_PAIRS_PER_REQUEST: u8 = 9;
@@ -78,6 +81,19 @@ fn misc(state: &mut State, reply: &mut [u8; REPORT_LEN]) -> Result<(), String> {
             SUCCESS
         }
         DEBOUNCE_SET if reply[2] >= DEBOUNCE_ALGORITHMS => FAILURE,
+        DEBOUNCE_SET if reply[3] == 0 => {
+            return Err(refuse(
+                "the firmware turns a time of 0 ms into no debounce, which the mock does not \
+                 model"
+                    .to_owned(),
+            ));
+        }
+        DEBOUNCE_SET if reply[2] == ASYMMETRIC && reply[3] > ASYMMETRIC_MAX_MS => {
+            return Err(refuse(format!(
+                "the firmware caps the asymmetric algorithm at {ASYMMETRIC_MAX_MS} ms, which the \
+                 mock does not model"
+            )));
+        }
         DEBOUNCE_SET => {
             state.debounce = [reply[2], reply[3]];
             SUCCESS
@@ -97,13 +113,11 @@ fn misc(state: &mut State, reply: &mut [u8; REPORT_LEN]) -> Result<(), String> {
         }
         SNAP_CLICK_SET => {
             let pairs = snap_click_pairs(state, reply).map_err(refuse)?;
-            let (entries, _) = reply[4..].as_chunks::<3>();
-            for (pair, entry) in state.snap_click[pairs].iter_mut().zip(entries) {
-                if entry[0] >= SNAP_CLICK_MODES {
-                    return Err(refuse(format!("Snap Click mode {} is unknown", entry[0])));
-                }
-                *pair = *entry;
+            let entries = &reply[4..].as_chunks::<3>().0[..pairs.len()];
+            if let Some([mode, ..]) = entries.iter().find(|[mode, ..]| *mode >= SNAP_CLICK_MODES) {
+                return Err(refuse(format!("Snap Click mode {mode} is unknown")));
             }
+            state.snap_click[pairs].copy_from_slice(entries);
             SUCCESS
         }
         // The fake keeps one copy of the pairs: saving them to EEPROM changes nothing it reports.

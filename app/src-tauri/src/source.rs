@@ -537,10 +537,11 @@ mod tests {
 
     const MOCK: &str = "v5-max-iso.mock.toml";
     const KEYS_PER_LAYER: usize = 6 * 19;
-    /// Row 2, column 1: the key labelled `Q` on the FR ISO layout.
+    /// Row 2, column 1: the key labelled `A` on the FR ISO layout.
     const ROW: u8 = 2;
     const COLUMN: u8 = 1;
     const KC_A: u16 = 0x0004;
+    const KC_B: u16 = 0x0005;
 
     fn mock_directory(test: &str) -> (FixtureDirectory, DeviceSource, String) {
         let directory = FixtureDirectory::new(test).with_synthetic("keyboard.mock.toml", MOCK);
@@ -635,7 +636,8 @@ mod tests {
     #[test]
     fn restoring_the_backup_of_a_mock_keymap_write_shows_the_old_key_again() {
         let (_directory, source, path) = mock_directory("mock-undo");
-        let before = keycode_at(&source, &path);
+        // A non-zero key, so a restore that wrote the zero seed back would not pass.
+        set_keycode(&source, &path, KC_B);
         let backup = set_keycode(&source, &path, KC_A);
         let (device, transport) = source.open(&path).unwrap();
         let verified = require_write_verified("keymap writes", &device).unwrap();
@@ -646,7 +648,7 @@ mod tests {
             |_| Ok(()),
         )
         .unwrap();
-        assert_eq!(keycode_at(&source, &path), before);
+        assert_eq!(keycode_at(&source, &path), KC_B);
     }
 
     #[test]
@@ -665,7 +667,7 @@ mod tests {
     #[test]
     fn refuses_an_invalid_mock_keyboard_file_and_names_it() {
         let directory = FixtureDirectory::new("mock-invalid")
-            .with_file("broken.mock.toml", "format_version = 2\n");
+            .with_file("broken.mock.toml", "format_version = 1\n");
         let error = DeviceSource::fixtures(directory.path()).unwrap_err();
         assert!(
             error.to_string().starts_with(&format!(

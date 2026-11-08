@@ -13,15 +13,22 @@ use crate::{keychron, via};
 /// The only mock keyboard file format this build reads.
 pub const MOCK_FORMAT_VERSION: u32 = 1;
 
-// The seed. Synthetic values, not a V5 Max's firmware defaults: the keymap starts as zeros, the
-// way the hand-written fixtures leave unspecified keycodes.
+// The seed. Every keycode and macro byte starts at zero, the way the hand-written fixtures
+// leave unspecified keycodes: not the V5 Max's firmware defaults.
+
+/// Synthetic: no V5 Max has reported its layer count to openkeychron yet.
 const LAYER_COUNT: u8 = 4;
+/// The pinned V5 Max ISO definition has one encoder (`openkeychron_guard::keymap`).
 pub(crate) const ENCODER_COUNT: u8 = 1;
+/// Synthetic: no V5 Max has reported its macro count or buffer size to openkeychron yet.
 const MACRO_COUNT: u8 = 16;
 const MACRO_BUFFER_SIZE: usize = 512;
+/// The V5 Max holds 20 pairs (`docs/protocol/keychron.md`, misc group `0x07`).
 const SNAP_CLICK_PAIRS: usize = 20;
-/// `v5_max/info.json` sets the default debounce time to 50 ms (`docs/protocol/keychron.md`).
+/// Symmetric defer global at 50 ms: `v5_max/info.json`'s default time
+/// (`docs/protocol/keychron.md`).
 const DEBOUNCE: [u8; 2] = [0, 50];
+/// The firmware defaults, 600 s and 7200 s (`docs/protocol/keychron.md`, "set wireless sleep").
 const WIRELESS_TIMERS: [u16; 2] = [600, 7200];
 
 /// Why a mock keyboard could not be made. No message names the file: the caller that chose it
@@ -87,6 +94,7 @@ pub struct MockTransport {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MockFile {
+    #[expect(dead_code, reason = "checked before the whole file is read")]
     format_version: u32,
     device: DeviceIdentity,
 }
@@ -111,13 +119,21 @@ impl MockKeyboard {
 
     /// A seeded keyboard from a mock keyboard file (`docs/DEVELOPMENT.md`, mock mode).
     pub fn load(path: &Path) -> Result<Self, MockError> {
+        // The version is read on its own first, so a newer file is refused for its version
+        // rather than for a field this build does not know.
+        #[derive(Deserialize)]
+        struct VersionProbe {
+            format_version: u32,
+        }
+
         let text = std::fs::read_to_string(path).map_err(MockError::Read)?;
-        let file: MockFile = toml::from_str(&text).map_err(MockError::Parse)?;
-        if file.format_version != MOCK_FORMAT_VERSION {
+        let probe: VersionProbe = toml::from_str(&text).map_err(MockError::Parse)?;
+        if probe.format_version != MOCK_FORMAT_VERSION {
             return Err(MockError::UnsupportedVersion {
-                found: file.format_version,
+                found: probe.format_version,
             });
         }
+        let file: MockFile = toml::from_str(&text).map_err(MockError::Parse)?;
         Self::new(file.device)
     }
 

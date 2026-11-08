@@ -7,9 +7,11 @@
 //! it to drive a write and its undo end to end.
 //!
 //! It answers only the requests listed in `docs/protocol/` that openkeychron sends for the
-//! keymap, macros, `info` and the settings. Any other request, and any request out of range,
-//! fails the transport write with [`TransportError::Device`](openkeychron_hid::TransportError)
-//! naming it: the fake never makes up a firmware answer.
+//! keymap, macros, `info` and the settings. Where `docs/protocol/keychron.md` says the firmware
+//! refuses a value with status 1, it does the same. Any other request, any request out of range,
+//! and any value the firmware would silently change, fails the transport write with
+//! [`TransportError::Device`](openkeychron_hid::TransportError) naming it: the fake never makes
+//! up a firmware answer.
 
 mod keyboard;
 mod keychron;

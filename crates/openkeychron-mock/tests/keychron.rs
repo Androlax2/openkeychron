@@ -164,6 +164,49 @@ mod tests {
     }
 
     #[test]
+    fn a_snap_click_set_with_an_unknown_mode_changes_no_pair() {
+        let keyboard = v5_max_iso();
+        let mut request = [0; 32];
+        request[..10].copy_from_slice(&[0xa7, 0x09, 0, 2, 1, 0x04, 0x07, 9, 0x04, 0x07]);
+        assert_eq!(
+            keyboard.connect().write(&request).unwrap_err().to_string(),
+            "device I/O failed: the mock keyboard refuses Keychron command 0xa7 0x09: Snap Click \
+             mode 9 is unknown"
+        );
+        assert!(
+            keychron(&keyboard)
+                .snap_click_pairs()
+                .unwrap()
+                .iter()
+                .all(|pair| pair.mode == SnapClickMode::Off)
+        );
+    }
+
+    fn refusal(keyboard: &MockKeyboard, prefix: &[u8]) -> String {
+        let mut request = [0; 32];
+        request[..prefix.len()].copy_from_slice(prefix);
+        keyboard.connect().write(&request).unwrap_err().to_string()
+    }
+
+    #[test]
+    fn refuses_a_debounce_time_of_zero_which_the_firmware_turns_into_no_debounce() {
+        assert_eq!(
+            refusal(&v5_max_iso(), &[0xa7, 0x06, 0, 0]),
+            "device I/O failed: the mock keyboard refuses Keychron command 0xa7 0x06: the \
+             firmware turns a time of 0 ms into no debounce, which the mock does not model"
+        );
+    }
+
+    #[test]
+    fn refuses_an_asymmetric_debounce_time_the_firmware_caps() {
+        assert_eq!(
+            refusal(&v5_max_iso(), &[0xa7, 0x06, 5, 128]),
+            "device I/O failed: the mock keyboard refuses Keychron command 0xa7 0x06: the \
+             firmware caps the asymmetric algorithm at 127 ms, which the mock does not model"
+        );
+    }
+
+    #[test]
     fn refuses_a_snap_click_request_past_the_last_pair() {
         let mut transport = v5_max_iso().connect();
         let mut request = [0; 32];
