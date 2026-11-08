@@ -9,12 +9,16 @@ use std::ops::Range;
 use openkeychron_via::REPORT_LEN;
 
 use crate::keyboard::{ENCODER_COUNT, State, not_answered};
+use crate::lighting;
 
 const GET_PROTOCOL_VERSION: u8 = 0x01;
 const GET_KEYBOARD_VALUE: u8 = 0x02;
 const GET_KEYCODE: u8 = 0x04;
 const SET_KEYCODE: u8 = 0x05;
 const RESET_KEYMAP: u8 = 0x06;
+const CUSTOM_SET_VALUE: u8 = 0x07;
+const CUSTOM_GET_VALUE: u8 = 0x08;
+const CUSTOM_SAVE: u8 = 0x09;
 const GET_MACRO_COUNT: u8 = 0x0c;
 const GET_MACRO_BUFFER_SIZE: u8 = 0x0d;
 const GET_MACRO_BUFFER: u8 = 0x0e;
@@ -62,6 +66,9 @@ pub(crate) fn answer(state: &mut State, reply: &mut [u8; REPORT_LEN]) -> Result<
             state.keymap[key].copy_from_slice(&reply[4..6]);
         }
         RESET_KEYMAP => state.reset_keymap(),
+        CUSTOM_SET_VALUE | CUSTOM_GET_VALUE | CUSTOM_SAVE => {
+            lighting::via_rgb_matrix(&mut state.lighting, reply)?;
+        }
         GET_MACRO_COUNT => reply[1] = state.macro_count,
         GET_MACRO_BUFFER_SIZE => {
             let size = u16::try_from(state.macros.len())

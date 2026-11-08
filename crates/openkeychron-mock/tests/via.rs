@@ -159,9 +159,9 @@ mod tests {
     fn refuses_a_request_it_does_not_implement_and_names_it() {
         let mut transport = v5_max_iso().connect();
         assert_eq!(
-            transport.write(&request(&[0x07, 0x03, 0x01])),
+            transport.write(&request(&[0x03, 0x01])),
             Err(TransportError::Device(
-                "the mock keyboard does not answer request 07 03 01".to_owned()
+                "the mock keyboard does not answer request 03 01".to_owned()
             ))
         );
     }

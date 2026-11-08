@@ -135,10 +135,17 @@ OPENKEYCHRON_FIXTURE=/tmp/openkeychron-mock pnpm --dir app tauri dev
 - A file named `*.mock.toml` is a mock keyboard: a stateful fake V5 Max ISO on a cable
   (`crates/openkeychron-mock`). It answers `read_info`, `read_keymap`, `read_macros` and
   `read_settings`, and a write (keymap, macros, debounce, Snap Click, wireless timers) changes
-  its state, so the next read shows it. It starts from a synthetic seed (four layers of zero
-  keycodes, sixteen empty macros, debounce 50 ms) each time the app starts, and never touches
-  the file. It answers no lighting command yet: a request it does not implement fails with
-  "the mock keyboard does not answer request …".
+  its state, so the next read shows it. It also holds the lighting the clients read and write:
+  VIA's RGB matrix values (brightness, effect, speed, colour), the `0xA2` feature bits, and
+  Keychron's per-key colours, LED lookup, mixed RGB regions and effect lists (`0xA8`), with
+  the V5 Max ISO's 98 LEDs and its key-to-LED map. It starts from a synthetic seed (four
+  layers of zero keycodes, sixteen empty macros, debounce 50 ms, effect 1 with every other
+  lighting value at zero, every LED in mixed region 0, empty effect lists) each time the app
+  starts, and never touches the file. Effect numbers are synthetic: it takes effects 1 to 24,
+  with 24 as mixed RGB. A request it does not implement (for example the indicator or per-key
+  type commands) fails with "the mock keyboard does not answer request …", and a value the
+  firmware would silently change (an effect past 24, brightness while lighting is off) fails
+  with "the mock keyboard refuses …".
 - Any other `.toml` file is a fixture. Every command replays it from the start through
   `ReplayTransport`, like the CLI's `--fixture`. A fixture device therefore answers only the
   command it recorded, as often as the UI asks: `cli-keymap.toml` answers `read_keymap`, and

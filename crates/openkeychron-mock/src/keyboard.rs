@@ -8,6 +8,7 @@ use openkeychron_via::{DeviceRegistry, REPORT_LEN};
 use serde::Deserialize;
 use thiserror::Error;
 
+use crate::lighting::Lighting;
 use crate::{keychron, via};
 
 /// The only mock keyboard file format this build reads.
@@ -81,6 +82,7 @@ pub(crate) struct State {
     pub(crate) snap_click: Vec<[u8; 3]>,
     /// Backlight-off, then sleep, in seconds.
     pub(crate) wireless: [u16; 2],
+    pub(crate) lighting: Lighting,
 }
 
 /// One connection to a [`MockKeyboard`]. Each request queues its reply for the next read.
@@ -165,6 +167,7 @@ impl State {
             debounce: DEBOUNCE,
             snap_click: vec![[0; 3]; SNAP_CLICK_PAIRS],
             wireless: WIRELESS_TIMERS,
+            lighting: Lighting::seeded(),
         };
         state.reset_keymap();
         state

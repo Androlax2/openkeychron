@@ -222,10 +222,10 @@ mod tests {
     fn refuses_a_keychron_request_it_does_not_implement_and_names_it() {
         let mut transport = v5_max_iso().connect();
         let mut request = [0; 32];
-        request[..2].copy_from_slice(&[0xa8, 0x01]);
+        request[..2].copy_from_slice(&[0xa8, 0x03]);
         assert_eq!(
             transport.write(&request).unwrap_err().to_string(),
-            "device I/O failed: the mock keyboard does not answer request a8 01"
+            "device I/O failed: the mock keyboard does not answer request a8 03"
         );
     }
 }

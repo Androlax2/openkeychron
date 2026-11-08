@@ -201,6 +201,10 @@ Limits the host has to live with:
   rounding, with `RGB_MATRIX_MAXIMUM_BRIGHTNESS` = 255 on the V5 Max), so 255 reads back as 254
   and 128 as 127. The read-back expects exactly that; a stored 255 (possible from the factory
   default) cannot be set again through VIA.
+- **Nothing but the effect changes while lighting is off.** Effect 0 disables the RGB matrix,
+  and `rgb_matrix_sethsv_noeeprom` and `rgb_matrix_set_speed_noeeprom` return early while it
+  is disabled (`quantum/rgb_matrix/rgb_matrix.c`): a brightness, speed or colour set is echoed
+  but changes nothing, so its read-back differs. Set an effect first.
 - **Effect numbers depend on the firmware build**, and out-of-range numbers are clamped rather
   than refused. A read-back that differs means nothing is saved; the RAM change stays until
   power-off or until the previous value is set again.
