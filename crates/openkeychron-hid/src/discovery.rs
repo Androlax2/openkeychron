@@ -78,12 +78,19 @@ pub fn keychron_via_interfaces(
         })
         .map(|interface| KeychronDevice {
             is_receiver: RECEIVER_PRODUCT_IDS.contains(&interface.product_id),
-            name: interface.name,
+            name: interface.name.as_deref().and_then(clean_product_name),
             vendor_id: interface.vendor_id,
             product_id: interface.product_id,
             path: interface.path,
         })
         .collect()
+}
+
+/// Some firmware pads the USB product string (the Keychron Link reports `"Keychron Link "`).
+/// A name with nothing left after trimming is no name, so callers show their own placeholder.
+fn clean_product_name(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
 /// A fixture, or a mock keyboard, was recorded from something other than a Keychron VIA
@@ -256,6 +263,47 @@ mod tests {
         let found = keychron_via_interfaces([interface(0x3434, 0x0951, 0xff60, 0x61)]);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].product_id, 0x0951);
+    }
+
+    fn named_interface(name: Option<&str>) -> HidInterface {
+        HidInterface {
+            name: name.map(str::to_owned),
+            ..interface(0x3434, 0xd030, 0xff60, 0x61)
+        }
+    }
+
+    #[test]
+    fn trims_whitespace_around_the_product_name() {
+        let found = keychron_via_interfaces([named_interface(Some("  Keychron Link \t"))]);
+        assert_eq!(found[0].name.as_deref(), Some("Keychron Link"));
+    }
+
+    #[test]
+    fn keeps_whitespace_inside_the_product_name() {
+        let found = keychron_via_interfaces([named_interface(Some("Keychron  V5 Max"))]);
+        assert_eq!(found[0].name.as_deref(), Some("Keychron  V5 Max"));
+    }
+
+    #[test]
+    fn turns_an_empty_product_name_into_none() {
+        let found = keychron_via_interfaces([named_interface(Some(""))]);
+        assert_eq!(found[0].name, None);
+    }
+
+    #[test]
+    fn turns_a_whitespace_only_product_name_into_none() {
+        let found = keychron_via_interfaces([named_interface(Some(" \t\n "))]);
+        assert_eq!(found[0].name, None);
+    }
+
+    #[test]
+    fn trims_the_product_name_of_a_fixture_device() {
+        let identity = DeviceIdentity {
+            name: "Keychron Link ".to_owned(),
+            ..identity(0x3434, 0xff60, 0x61)
+        };
+        let device = fixture_device(&identity, Path::new("link.toml")).unwrap();
+        assert_eq!(device.name.as_deref(), Some("Keychron Link"));
     }
 
     #[test]
