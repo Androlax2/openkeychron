@@ -11,7 +11,7 @@
 //!   as often as it likes. A write is checked against the fixture in memory and goes nowhere
 //!   else: not to a keyboard, not to the file, and not into the next command.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -30,6 +30,9 @@ pub const FIXTURE_VARIABLE: &str = "OPENKEYCHRON_FIXTURE";
 /// The file name ending that makes a `.toml` file a mock keyboard rather than a fixture. A mock
 /// keyboard file also parses as a fixture without events, so the name decides.
 const MOCK_SUFFIX: &str = ".mock.toml";
+
+/// Where Linux lists each hidraw node, the only kind of path the `hidapi` backend gives.
+const SYSFS_HIDRAW: &str = "/sys/class/hidraw";
 
 #[derive(Debug)]
 pub enum DeviceSource {
@@ -83,6 +86,19 @@ pub enum SourceError {
 
     #[error(transparent)]
     NotKeychronVia(#[from] NotKeychronVia),
+}
+
+/// One plug-in of a device, which a keymap history belongs to. Linux names each HID device
+/// anew when it is plugged in (`0003:3434:0951.0007`, from a counter that only goes up), so a
+/// keyboard plugged in again on the same path, or another keyboard taking that path, is another
+/// connection.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Connection {
+    /// The path `list_devices` gave.
+    pub path: String,
+    /// The kernel's name for the HID device at `path`. `None` for a mock mode device, which is
+    /// never unplugged, so its path is enough.
+    pub hid_device: Option<String>,
 }
 
 /// What a command reads and writes through: a keyboard, a fixture's in-memory replay, or a mock
@@ -188,6 +204,46 @@ impl DeviceSource {
             }
         }
     }
+
+    /// `open`, and which plug-in of the device the transport reached. The connection is read
+    /// after opening, so it is never older than the transport.
+    pub fn open_connection(
+        &self,
+        path: &str,
+    ) -> Result<(KeychronDevice, Transport, Connection), CommandError> {
+        let (device, transport) = self.open(path)?;
+        let connection = match self {
+            Self::Hardware => hidraw_connection(Path::new(SYSFS_HIDRAW), &device.path)?,
+            Self::Fixtures(_) => Connection {
+                path: device.path.clone(),
+                hid_device: None,
+            },
+        };
+        Ok((device, transport, connection))
+    }
+}
+
+/// The connection of the hidraw node at `path` (`/dev/hidrawN`): the HID device its entry in
+/// `sysfs_hidraw` links to.
+fn hidraw_connection(sysfs_hidraw: &Path, path: &str) -> Result<Connection, CommandError> {
+    let unknown = |reason: String| CommandError::UnknownConnection {
+        path: path.to_owned(),
+        reason,
+    };
+    let node = Path::new(path)
+        .file_name()
+        .ok_or_else(|| unknown("the path names no hidraw node".to_owned()))?;
+    let link = sysfs_hidraw.join(node).join("device");
+    let target = std::fs::read_link(&link)
+        .map_err(|error| unknown(format!("reading {}: {error}", link.display())))?;
+    let hid_device = target
+        .file_name()
+        .and_then(OsStr::to_str)
+        .ok_or_else(|| unknown(format!("{} links to {}", link.display(), target.display())))?;
+    Ok(Connection {
+        path: path.to_owned(),
+        hid_device: Some(hid_device.to_owned()),
+    })
 }
 
 impl FixtureDevice {
@@ -233,7 +289,7 @@ mod tests {
     use openkeychron_hid::{Event, HidTransport, TransportError};
     use openkeychron_via::Via;
 
-    use super::{DeviceSource, Transport};
+    use super::{Connection, DeviceSource, Transport, hidraw_connection};
     use crate::info::{self, KeychronFirmware};
     use crate::test_support::{load_fixture, synthetic_path};
     use crate::{keymap, macros, settings};
@@ -664,6 +720,72 @@ mod tests {
                 directory.path().join("other.mock.toml").display()
             )
         );
+    }
+
+    /// A stand-in for `/sys/class/hidraw`, where each node links to the HID device behind it.
+    struct Sysfs(FixtureDirectory);
+
+    impl Sysfs {
+        fn new(test: &str) -> Self {
+            Self(FixtureDirectory::new(test))
+        }
+
+        /// Plugs `hid_device` in at `node`, as the kernel would: its sysfs entry links to it.
+        fn plug_in(&self, node: &str, hid_device: &str) {
+            let entry = self.0.path().join(node);
+            std::fs::create_dir_all(&entry).unwrap();
+            let link = entry.join("device");
+            let _ = std::fs::remove_file(&link);
+            std::os::unix::fs::symlink(format!("../../../{hid_device}"), link).unwrap();
+        }
+
+        fn connection(&self, path: &str) -> Result<Connection, crate::error::CommandError> {
+            hidraw_connection(self.0.path(), path)
+        }
+    }
+
+    #[test]
+    fn a_hidraw_device_is_connected_as_the_hid_device_its_sysfs_node_links_to() {
+        let sysfs = Sysfs::new("sysfs-link");
+        sysfs.plug_in("hidraw5", "0003:3434:0951.0007");
+        assert_eq!(
+            sysfs.connection("/dev/hidraw5").unwrap(),
+            Connection {
+                path: "/dev/hidraw5".to_owned(),
+                hid_device: Some("0003:3434:0951.0007".to_owned()),
+            }
+        );
+    }
+
+    #[test]
+    fn a_device_plugged_in_again_on_the_same_path_is_another_connection() {
+        let sysfs = Sysfs::new("sysfs-replug");
+        sysfs.plug_in("hidraw5", "0003:3434:0951.0007");
+        let first = sysfs.connection("/dev/hidraw5").unwrap();
+        sysfs.plug_in("hidraw5", "0003:3434:0951.0008");
+        assert_ne!(sysfs.connection("/dev/hidraw5").unwrap(), first);
+    }
+
+    #[test]
+    fn refuses_a_hidraw_node_without_a_sysfs_entry_and_names_it() {
+        let sysfs = Sysfs::new("sysfs-missing");
+        let error = sysfs.connection("/dev/hidraw5").unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "cannot tell which keyboard is at /dev/hidraw5, so keymap commands on it are \
+                 refused: reading {}: No such file or directory (os error 2)",
+                sysfs.0.path().join("hidraw5/device").display()
+            )
+        );
+    }
+
+    #[test]
+    fn a_mock_device_stays_one_connection_across_commands() {
+        let (_directory, source, path) = mock_directory("mock-connection");
+        let (_, _, first) = source.open_connection(&path).unwrap();
+        let (_, _, again) = source.open_connection(&path).unwrap();
+        assert_eq!(first, again);
     }
 
     #[test]

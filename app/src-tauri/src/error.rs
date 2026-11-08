@@ -17,6 +17,13 @@ pub enum CommandError {
     #[error("{path} is not a connected Keychron VIA interface; connected: {connected}")]
     NotConnected { path: String, connected: String },
 
+    /// A keymap history belongs to one plug-in of a keyboard, and the app could not tell which
+    /// one is at `path`.
+    #[error(
+        "cannot tell which keyboard is at {path}, so keymap commands on it are refused: {reason}"
+    )]
+    UnknownConnection { path: String, reason: String },
+
     #[error("{0}")]
     Via(String),
 

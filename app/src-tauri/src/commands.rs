@@ -1,8 +1,10 @@
 //! The Tauri commands the UI calls. Each command but `list_devices` finds the device by the path
 //! `list_devices` gave, opens it and hands it to a function. The `read_*` commands only read.
 //! `set_keycode`, `undo_keymap_change`, `redo_keymap_change` and `restore_keymap_backup` write the
-//! keymap, through the guarded write path in `keymap_edit`. Devices come from the `DeviceSource`:
-//! the connected keyboards, or the fixtures of mock mode.
+//! keymap, through the guarded write path in `keymap_edit`. The keymap commands use the history
+//! of the device's connection, not of its path, so a keyboard plugged in again on that path
+//! starts a new one. Devices come from the `DeviceSource`: the connected keyboards, or the
+//! fixtures of mock mode.
 //!
 //! A new command goes in three places: `generate_handler!` in `main.rs`, `COMMANDS` in
 //! `build.rs` (which generates its `allow-` permission) and `capabilities/default.json`.
@@ -68,12 +70,8 @@ pub fn read_keymap(
     histories: State<'_, KeymapHistories>,
 ) -> Result<EditableKeymap, CommandError> {
     let _exclusive = access.exclusive();
-    let (device, transport) = source.open(&path)?;
-    keymap_edit::read(
-        transport,
-        &device,
-        histories.lock().entry(path).or_default(),
-    )
+    let (device, transport, connection) = source.open_connection(&path)?;
+    keymap_edit::read(transport, &device, histories.lock().of(connection))
 }
 
 /// Writes. Sets one key and returns the keymap read again after the write.
@@ -90,11 +88,11 @@ pub fn set_keycode(
     histories: State<'_, KeymapHistories>,
 ) -> Result<EditableKeymap, CommandError> {
     let _exclusive = access.exclusive();
-    let (device, transport) = source.open(&path)?;
+    let (device, transport, connection) = source.open_connection(&path)?;
     keymap_edit::set_keycode(
         transport,
         &device,
-        histories.lock().entry(path).or_default(),
+        histories.lock().of(connection),
         assignment,
     )
 }
@@ -112,12 +110,8 @@ pub fn undo_keymap_change(
     histories: State<'_, KeymapHistories>,
 ) -> Result<EditableKeymap, CommandError> {
     let _exclusive = access.exclusive();
-    let (device, transport) = source.open(&path)?;
-    keymap_edit::undo(
-        transport,
-        &device,
-        histories.lock().entry(path).or_default(),
-    )
+    let (device, transport, connection) = source.open_connection(&path)?;
+    keymap_edit::undo(transport, &device, histories.lock().of(connection))
 }
 
 /// Writes. Puts back the keymap change the newest undo on the device took back.
@@ -133,12 +127,8 @@ pub fn redo_keymap_change(
     histories: State<'_, KeymapHistories>,
 ) -> Result<EditableKeymap, CommandError> {
     let _exclusive = access.exclusive();
-    let (device, transport) = source.open(&path)?;
-    keymap_edit::redo(
-        transport,
-        &device,
-        histories.lock().entry(path).or_default(),
-    )
+    let (device, transport, connection) = source.open_connection(&path)?;
+    keymap_edit::redo(transport, &device, histories.lock().of(connection))
 }
 
 /// Writes. Puts back the keymap from before the app's first change on the device.
@@ -154,12 +144,8 @@ pub fn restore_keymap_backup(
     histories: State<'_, KeymapHistories>,
 ) -> Result<EditableKeymap, CommandError> {
     let _exclusive = access.exclusive();
-    let (device, transport) = source.open(&path)?;
-    keymap_edit::restore_backup(
-        transport,
-        &device,
-        histories.lock().entry(path).or_default(),
-    )
+    let (device, transport, connection) = source.open_connection(&path)?;
+    keymap_edit::restore_backup(transport, &device, histories.lock().of(connection))
 }
 
 #[tauri::command(async)]

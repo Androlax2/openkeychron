@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::CommandError;
 use crate::keymap::{self, Keymap};
+use crate::source::Connection;
 
 /// What the write gate's refusal names.
 const WRITES: &str = "keymap writes";
@@ -45,7 +46,8 @@ pub struct KeyAssignment {
     pub keycode: u16,
 }
 
-/// Every keymap the app replaced on one device, kept in memory until the app quits.
+/// Every keymap the app replaced on one device, kept in memory until the app quits or the device
+/// is unplugged.
 #[derive(Debug, Default)]
 pub struct KeymapHistory {
     /// The keymap from before the app's first change: what Restore backup writes back.
@@ -114,12 +116,28 @@ impl KeymapHistory {
     }
 }
 
-/// The keymap history of each device, by the path `list_devices` gave it.
+/// The keymap history of each device, by its connection: a history taken from one keyboard is
+/// never offered to another plugged in on the same path, where Restore backup would write the
+/// first keyboard's keymap onto it.
 #[derive(Debug, Default)]
-pub struct KeymapHistories(Mutex<HashMap<String, KeymapHistory>>);
+pub struct KeymapHistories(Mutex<HistoriesByConnection>);
+
+#[derive(Debug, Default)]
+pub struct HistoriesByConnection(HashMap<Connection, KeymapHistory>);
+
+impl HistoriesByConnection {
+    /// The history of `connection`, empty for a new one. Drops the history of any earlier
+    /// connection on the same path: that plug-in is gone, and the kernel never names another
+    /// one the same.
+    pub fn of(&mut self, connection: Connection) -> &mut KeymapHistory {
+        self.0
+            .retain(|kept, _| kept.path != connection.path || *kept == connection);
+        self.0.entry(connection).or_default()
+    }
+}
 
 impl KeymapHistories {
-    pub fn lock(&self) -> MutexGuard<'_, HashMap<String, KeymapHistory>> {
+    pub fn lock(&self) -> MutexGuard<'_, HistoriesByConnection> {
         // A history changes only through whole-value pushes, pops and assignments, so a command
         // that panicked while holding the lock left every backup in it complete.
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
@@ -275,9 +293,11 @@ mod tests {
     use openkeychron_mock::{MockKeyboard, MockTransport};
 
     use super::{
-        EditableKeymap, KeyAssignment, KeymapHistory, read, redo, restore_backup, set_keycode, undo,
+        EditableKeymap, KeyAssignment, KeymapHistories, KeymapHistory, read, redo, restore_backup,
+        set_keycode, undo,
     };
     use crate::error::CommandError;
+    use crate::source::Connection;
     use crate::test_support::{Lent, lend, load_fixture, replay, synthetic_path};
 
     /// Row 2, column 1: the key labelled `A` on the FR ISO layout.
@@ -842,6 +862,96 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(mock.undo().keymap, before);
+    }
+
+    const PATH: &str = "/dev/hidraw5";
+    const FIRST_PLUG_IN: &str = "0003:3434:0951.0007";
+    const NEXT_PLUG_IN: &str = "0003:3434:0951.0008";
+
+    fn connection(path: &str, hid_device: &str) -> Connection {
+        Connection {
+            path: path.to_owned(),
+            hid_device: Some(hid_device.to_owned()),
+        }
+    }
+
+    /// Sets a key on `mock`'s keyboard through the history `histories` keeps for `connection`.
+    fn set_through(histories: &KeymapHistories, mock: &Mock, connection: Connection) {
+        set_keycode(
+            mock.keyboard.connect(),
+            &mock.device,
+            histories.lock().of(connection),
+            assignment(0, KC_A),
+        )
+        .unwrap();
+    }
+
+    fn read_through(
+        histories: &KeymapHistories,
+        mock: &Mock,
+        connection: Connection,
+    ) -> EditableKeymap {
+        read(
+            mock.keyboard.connect(),
+            &mock.device,
+            histories.lock().of(connection),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_keyboard_keeps_its_history_while_it_stays_plugged_in() {
+        let histories = KeymapHistories::default();
+        let mock = Mock::new();
+        set_through(&histories, &mock, connection(PATH, FIRST_PLUG_IN));
+        let keymap = read_through(&histories, &mock, connection(PATH, FIRST_PLUG_IN));
+        assert_eq!((keymap.undo_steps, keymap.can_restore_backup), (1, true));
+    }
+
+    #[test]
+    fn a_keyboard_plugged_in_again_on_the_same_path_starts_without_history() {
+        let histories = KeymapHistories::default();
+        let mock = Mock::new();
+        set_through(&histories, &mock, connection(PATH, FIRST_PLUG_IN));
+        let keymap = read_through(&histories, &mock, connection(PATH, NEXT_PLUG_IN));
+        assert_eq!((keymap.undo_steps, keymap.can_restore_backup), (0, false));
+    }
+
+    #[test]
+    fn restore_backup_refuses_another_keyboard_plugged_in_on_the_same_path() {
+        let histories = KeymapHistories::default();
+        set_through(&histories, &Mock::new(), connection(PATH, FIRST_PLUG_IN));
+        let other = Mock::new();
+        let error = restore_backup(
+            other.keyboard.connect(),
+            &other.device,
+            histories.lock().of(connection(PATH, NEXT_PLUG_IN)),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "no keymap backup yet: the app keeps one when it first changes this keyboard's keymap"
+        );
+    }
+
+    #[test]
+    fn forgets_a_history_once_another_plug_in_takes_its_path() {
+        let histories = KeymapHistories::default();
+        let mock = Mock::new();
+        set_through(&histories, &mock, connection(PATH, FIRST_PLUG_IN));
+        read_through(&histories, &mock, connection(PATH, NEXT_PLUG_IN));
+        let keymap = read_through(&histories, &mock, connection(PATH, FIRST_PLUG_IN));
+        assert_eq!(keymap.undo_steps, 0);
+    }
+
+    #[test]
+    fn a_keyboard_on_another_path_keeps_its_history() {
+        let histories = KeymapHistories::default();
+        let mock = Mock::new();
+        set_through(&histories, &mock, connection(PATH, FIRST_PLUG_IN));
+        read_through(&histories, &mock, connection("/dev/hidraw6", NEXT_PLUG_IN));
+        let keymap = read_through(&histories, &mock, connection(PATH, FIRST_PLUG_IN));
+        assert_eq!(keymap.undo_steps, 1);
     }
 
     #[test]
