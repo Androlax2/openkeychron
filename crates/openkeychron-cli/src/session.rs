@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use openkeychron_guard::GuardError;
 use openkeychron_hid::{
-    DeviceIdentity, Event, Fixture, FixtureError, HidInterface, HidTransport, HidapiTransport,
-    KeychronDevice, RecordingTransport, ReplayTransport, TransportError, VIA_USAGE, VIA_USAGE_PAGE,
-    keychron_via_interfaces,
+    DeviceIdentity, Event, Fixture, FixtureError, HidTransport, HidapiTransport, KeychronDevice,
+    NotKeychronVia, RecordingTransport, ReplayTransport, TransportError, VIA_USAGE, VIA_USAGE_PAGE,
+    fixture_device,
 };
 use openkeychron_via::ViaError;
 
@@ -56,6 +56,12 @@ impl std::fmt::Display for SessionError {
 impl From<FixtureError> for SessionError {
     fn from(error: FixtureError) -> Self {
         Self::Fixture(error)
+    }
+}
+
+impl From<NotKeychronVia> for SessionError {
+    fn from(error: NotKeychronVia) -> Self {
+        Self::Usage(error.to_string())
     }
 }
 
@@ -117,7 +123,7 @@ impl SessionError {
 /// Lists devices: the fixture's device when replaying, otherwise the connected ones.
 pub fn list(fixture: Option<&Path>) -> Result<Vec<KeychronDevice>, SessionError> {
     match fixture {
-        Some(path) => Ok(vec![fixture_device(&Fixture::load(path)?, path)?]),
+        Some(path) => Ok(vec![fixture_device(&Fixture::load(path)?.device, path)?]),
         None => Ok(openkeychron_hid::list_keychron_devices()?),
     }
 }
@@ -149,7 +155,7 @@ impl Session {
         if let Some(path) = fixture {
             let fixture = Fixture::load(path)?;
             return Ok(Self {
-                device: fixture_device(&fixture, path)?,
+                device: fixture_device(&fixture.device, path)?,
                 link: Link::Replay(ReplayTransport::new(fixture)),
                 reply_timeout: None,
             });
@@ -284,34 +290,6 @@ fn listed_paths(devices: &[KeychronDevice]) -> String {
         .map(|device| device.path.as_str())
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-/// The device a fixture was recorded from, as `list` would have shown it. A fixture from
-/// anything other than a Keychron VIA interface is refused rather than replayed.
-fn fixture_device(fixture: &Fixture, path: &Path) -> Result<KeychronDevice, SessionError> {
-    let identity = &fixture.device;
-    let interface = HidInterface {
-        name: Some(identity.name.clone()),
-        vendor_id: identity.vendor_id,
-        product_id: identity.product_id,
-        usage_page: identity.usage_page,
-        usage: identity.usage,
-        path: format!("fixture:{}", path.display()),
-    };
-    keychron_via_interfaces([interface])
-        .into_iter()
-        .next()
-        .ok_or_else(|| {
-            SessionError::Usage(format!(
-                "{} was not recorded from a Keychron VIA interface ({:04x}:{:04x}, usage page \
-             0x{:04x}, usage 0x{:02x})",
-                path.display(),
-                identity.vendor_id,
-                identity.product_id,
-                identity.usage_page,
-                identity.usage
-            ))
-        })
 }
 
 #[cfg(test)]
