@@ -1,6 +1,6 @@
-//! The Keychron requests the mock keyboard answers: `0xA0`, `0xA1` and the misc group's
-//! debounce, Snap Click and wireless timers. IDs and layouts from `docs/protocol/keychron.md`,
-//! which cites `keyboards/keychron/common/keychron_raw_hid.h` and its handlers in
+//! The Keychron requests the mock keyboard answers: `0xA0`, `0xA1`, `0xA2`, the misc group's
+//! debounce, Snap Click and wireless timers, and the RGB group (`crate::lighting`). IDs and
+//! layouts from `docs/protocol/keychron.md`, which cites `keyboards/keychron/common/keychron_raw_hid.h` and its handlers in
 //! <https://github.com/Keychron/qmk_firmware/tree/2b493ff95f2665db719b1e95c91babb5036e72f3/keyboards/keychron/common>.
 
 use std::ops::Range;
@@ -8,10 +8,13 @@ use std::ops::Range;
 use openkeychron_via::REPORT_LEN;
 
 use crate::keyboard::{State, not_answered};
+use crate::lighting;
 
 const GET_PROTOCOL_VERSION: u8 = 0xa0;
 const GET_FIRMWARE_VERSION: u8 = 0xa1;
+const GET_SUPPORT_FEATURE: u8 = 0xa2;
 const MISC_GROUP: u8 = 0xa7;
+const RGB_GROUP: u8 = 0xa8;
 
 const MISC_GET_PROTOCOL_VER: u8 = 0x01;
 const DEBOUNCE_GET: u8 = 0x05;
@@ -29,6 +32,9 @@ const COMMAND_SET: u8 = 2;
 /// `v<version> <build date>`, the date naming it a mock so the UI never passes it off as a
 /// real firmware.
 const FIRMWARE_VERSION: &[u8] = b"v0.0.0 mock";
+/// Dynamic debounce (bit 5), Snap Click (bit 6) and Keychron RGB (bit 7): only the features the
+/// mock answers, so a host never sends it a request for the others.
+const FEATURES: u16 = 0b1110_0000;
 const MISC_PROTOCOL_VERSION: u16 = 0x0002;
 /// Debounce (bit 2), Snap Click (bit 3) and wireless timers (bit 4).
 const MISC_FEATURES: u8 = 0b0001_1100;
@@ -59,7 +65,13 @@ pub(crate) fn answer(state: &mut State, reply: &mut [u8; REPORT_LEN]) -> Result<
             reply[1..=FIRMWARE_VERSION.len()].copy_from_slice(FIRMWARE_VERSION);
             Ok(())
         }
+        GET_SUPPORT_FEATURE => {
+            reply[1] = 0;
+            reply[2..4].copy_from_slice(&FEATURES.to_le_bytes());
+            Ok(())
+        }
         MISC_GROUP => misc(state, reply),
+        RGB_GROUP => lighting::keychron_rgb(&mut state.lighting, reply),
         _ => Err(not_answered(reply)),
     }
 }
