@@ -20,7 +20,8 @@ pub enum CommandError {
     /// A keymap history belongs to one plug-in of a keyboard, and the app could not tell which
     /// one is at `path`.
     #[error(
-        "cannot tell which keyboard is at {path}, so keymap commands on it are refused: {reason}"
+        "cannot tell which keyboard is at {path}, so keymap commands on it are refused: \
+         {reason}; plug the keyboard in again"
     )]
     UnknownConnection { path: String, reason: String },
 
@@ -47,8 +48,13 @@ pub enum CommandError {
     #[error(transparent)]
     Guard(Box<GuardError>),
 
-    /// A write failed after its backup was kept, so the keyboard may have changed.
-    #[error("{error}; the keyboard may have changed: {recovery}")]
+    /// A write failed after its backup was kept, so the keyboard may have changed. The likeliest
+    /// cause is an unplug, and a keyboard plugged in again gets a new history without that
+    /// backup, so `recovery` holds only while it stays plugged in.
+    #[error(
+        "{error}; the keyboard may have changed: {recovery} while the keyboard stays plugged in; \
+         the app starts a new history once it is plugged in again"
+    )]
     WriteFailedAfterBackup {
         error: Box<CommandError>,
         recovery: &'static str,

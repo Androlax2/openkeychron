@@ -46,8 +46,8 @@ pub struct KeyAssignment {
     pub keycode: u16,
 }
 
-/// Every keymap the app replaced on one device, kept in memory until the app quits or the device
-/// is unplugged.
+/// Every keymap the app replaced on one device, kept in memory until the app quits or another
+/// plug-in takes the device's path.
 #[derive(Debug, Default)]
 pub struct KeymapHistory {
     /// The keymap from before the app's first change: what Restore backup writes back.
@@ -704,7 +704,9 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             error.to_string(),
-            "device I/O failed: unplugged; the keyboard may have changed: Undo again to retry"
+            "device I/O failed: unplugged; the keyboard may have changed: Undo again to retry \
+             while the keyboard stays plugged in; the app starts a new history once it is \
+             plugged in again"
         );
     }
 
@@ -765,7 +767,9 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             error.to_string(),
-            "device I/O failed: unplugged; the keyboard may have changed: Redo again to retry"
+            "device I/O failed: unplugged; the keyboard may have changed: Redo again to retry \
+             while the keyboard stays plugged in; the app starts a new history once it is \
+             plugged in again"
         );
     }
 
@@ -829,7 +833,8 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "device I/O failed: unplugged; the keyboard may have changed: Undo puts back the \
-             keymap from before the restore, and Restore backup tries again"
+             keymap from before the restore, and Restore backup tries again while the keyboard \
+             stays plugged in; the app starts a new history once it is plugged in again"
         );
     }
 
@@ -846,7 +851,8 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "device I/O failed: unplugged; the keyboard may have changed: Undo puts back the \
-             keymap from before this change"
+             keymap from before this change while the keyboard stays plugged in; the app starts \
+             a new history once it is plugged in again"
         );
     }
 

@@ -774,7 +774,8 @@ mod tests {
             error.to_string(),
             format!(
                 "cannot tell which keyboard is at /dev/hidraw5, so keymap commands on it are \
-                 refused: reading {}: No such file or directory (os error 2)",
+                 refused: reading {}: No such file or directory (os error 2); plug the keyboard \
+                 in again",
                 sysfs.0.path().join("hidraw5/device").display()
             )
         );
