@@ -33,6 +33,8 @@ before touching its area:
 | `crates/openkeychron-hid` | `HidTransport` trait, fixture format, replay and recording transports, Keychron device discovery and the `hidapi` transport |
 | `crates/openkeychron-via` | VIA protocol: versions, keymap, layers, macros (M1, M2) |
 | `crates/openkeychron-keychron` | Keychron-specific commands: RGB, debounce, LKP, wireless timers (M3) |
+| `crates/openkeychron-guard` | The guarded write path the CLI and the app share: write-verified gate, read-only capture, backup kept by the caller before any write, read-back |
+| `crates/openkeychron-mock` | A stateful fake keyboard behind `HidTransport`: the app's mock mode and end-to-end write tests |
 | `crates/openkeychron-cli` | The `openkeychron` binary (M1) |
 | `app/` | Tauri + SvelteKit desktop app (M4); calls the crates, holds no HID logic |
 
@@ -52,7 +54,8 @@ The sandbox cannot open `/dev/hidraw*`, and CI has no keyboard. So:
 
 ## Build and verify
 
-Toolchain: Rust stable (1.99+), plus `typos` and `cargo-deny` for the full gate.
+Toolchain: Rust stable (1.99+), plus `typos` and `cargo-deny` for the full gate, and Node.js,
+`pnpm` and WebKitGTK for the app (`docs/DEVELOPMENT.md`).
 
 ### While iterating
 

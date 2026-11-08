@@ -175,3 +175,158 @@ entry by reset button only.
   the USB product ID in the descriptors) as a wrong-file check.
 - Exactly when the V5 Max firmware checks the data-block version and what it resets on a
   mismatch: the boot path was not traced.
+
+## 2026-11: `keymap reset` ships, guarded by a read-back backup (#24)
+
+An earlier agent's plan on #24 kept `keymap reset` as a permanent refusal because the
+installed firmware's reset footprint and defaults were unverified. Theo overruled it on
+2026-11-07: reset ships as VIA `0x06`.
+
+Conditions: the CLI saves a complete matrix/encoder backup and reads it back before sending
+the reset, and refuses on any failure; Keychron's QMK source must show `0x06` rewrites only
+matrix and encoder keycodes (it does, see `docs/protocol/via-keymap-write.md`); and a
+`needs-hardware` issue (#82) confirms reset then restore on the real V5 Max.
+
+Why: `keymap restore` already rewrites everything `0x06` touches, so the backup is a full
+undo. The unknown defaults only mean the result of a reset cannot be read back and checked.
+
+## 2026-11: Macro text names its host layout (#89)
+
+The firmware types macro text through the US-ANSI `ascii_to_keycode_lut`, so `text:a` typed
+`q` on Theo's French AZERTY host. `macro set` now needs `--host-layout` whenever it has a
+`text:` action:
+
+- `fr` turns the text into the tap/down/up keystrokes that type it on French AZERTY, from
+  QMK's `keymap_french.h` (the Windows and Linux layout; macOS French differs). Shift and AltGr characters are wrapped in their modifier.
+- `us` keeps firmware text bytes, as VIA writes them.
+
+Characters that need a dead key (`^`, `¨`, `~`, `` ` ``) or have no key on the layout are
+refused, never approximated. `macro list --host-layout fr` shows those keystrokes as text
+again; without the flag it shows the stored actions.
+
+Why a required flag and no default: a default of `us` keeps the bug for every French user,
+and a default of `fr` types the wrong characters for everyone else. Both fail silently, on the
+host, after the write. A missing flag fails before any report is sent. The layout is a
+property of the host, not the keyboard, so it is not read from the device or the keyboard's
+own FR ISO layout.
+
+Not chosen: a separate action such as `fr-text:` (keeps the default ambiguity for `text:`),
+and reading the host's layout from the desktop session (platform-specific, and the macro may
+be played on another computer).
+
+## 2026-11: Other models' layouts come from VIA files the user supplies, never bundled (#41)
+
+Decided by Theo on 2026-11-07. `openkeychron-via` reads Keychron's VIA definition JSON
+(`ViaDefinition`) and keeps a `DeviceRegistry` keyed by USB vendor and product ID. The
+built-in V5 Max FR ISO table stays the only layout compiled in; any other model's layout is
+read from the file the user passes (`keymap show --layout <file>`). The registry is for
+reading and display: writes stay limited to the V5 Max ISO on a USB cable until another model
+is verified on hardware. `serde_json` (MIT OR Apache-2.0, already used by the CLI) became a
+dependency of `openkeychron-via` for this, as a workspace dependency.
+
+Rejected:
+
+- Bundling Keychron's VIA files in the repository: they are GPL-2.0, and openkeychron is
+  MIT OR Apache-2.0. Shipping them would need a licence decision, and the V5 Max table was
+  written to restate facts rather than embed upstream files
+  (`docs/protocol/v5-max-fr-iso-layout.md`).
+- Downloading the definition from GitHub at run time: openkeychron is local-first and makes
+  no network calls.
+
+Test definitions are hand-written synthetic files, not copies of upstream ones. See
+`docs/protocol/via-definitions.md`.
+
+Added on 2026-11-07 with #91, at Theo's request: each registry entry says whether writes to
+that model were verified on hardware (`WriteAccess`). Only the built-in V5 Max ISO is
+`VerifiedOverCable`; a definition registered from a file is always `ReadOnly`. Keymap and
+macro writes, `rgb key` and backup validation ask only the built-in registry, and no write
+command takes `--layout`, so a layout file never enables a write. Receivers stay refused.
+Since #100, `rgb set` and `settings set` ask it too.
+
+## 2026-11: `rgb mixed` edits regions and effects, and restores whole-state backups (#83)
+
+Decided by Theo on 2026-11-07, from three proposed designs. Mixed RGB gets four commands:
+`rgb mixed get [--json]`, `rgb mixed region --backup FILE REGION KEY...`,
+`rgb mixed effect --backup FILE REGION SLOT EFFECT HUE SAT SPEED DURATION_MS` and
+`rgb mixed restore --backup NEW_FILE FROM_FILE`.
+
+Every write asks the built-in registry first (cable, write-verified model), then captures the
+whole mixed state (every LED's region and every region's effect list) through a read-only
+wrapper and saves it to a new file that is read back before anything is sent
+(`rgb_guarded_write::write_mixed`, now `openkeychron_guard::rgb::write_mixed`). It then sets
+the whole state with read-back and saves it (`A8 02`); if any request fails, the save
+included, it sets the previous state again.
+`restore` saves its own pre-restore backup and refuses a backup for another model or another
+LED, region or slot count. Like the keymap and macro writes, these refuse `--record`, so a
+recording cannot overwrite a backup.
+
+Rejected:
+
+- Targeted edits without a `restore` command, printing undo commands like `rgb key`: undoing
+  a region change over many keys would take one command per region, and a lost terminal would
+  leave only the JSON backup to read by hand.
+- One declarative `apply FILE` command: one write path, but changing one key would mean
+  editing a 98-entry file by hand.
+
+`get` names keys from the built-in V5 Max ISO table, so it needs that keyboard on a cable too.
+
+Added on 2026-11-07 with #112: effect numbers depend on the firmware build, so mixed RGB
+backups are format version 2 and record the Keychron firmware version and build date
+(`0xA1`, as `info` reads it). Every write reads them in its read-only capture step and refuses
+to write when the keyboard does not report them. `restore` refuses a backup from another build
+unless `--allow-other-firmware` is given. A format version 1 backup records no build, so it is
+treated like one from another build: it still loads, and restores only with that flag. Refusing
+version 1 outright was rejected, because it would leave a backup taken before the update
+restorable only by editing its JSON by hand.
+
+## 2026-11: The guarded write path lives in its own crate, `openkeychron-guard` (#119)
+
+Placement left to the implementer by Theo on 2026-11-08. The CLI and the app write through
+one library, so the app (#37, #38) cannot skip a step the CLI takes. It holds the
+write-verified gate, the read-only capture wrappers, the keymap and macro backups with their
+read-back, and keymap/macro set, restore and reset.
+
+- **New crate, not `openkeychron-via` or `openkeychron-keychron`.** The path needs both: the
+  registry and keymap/macro writes are in `via`, per-key, mixed RGB and settings in `keychron`,
+  and neither depends on the other. Putting it in either would add that dependency to a protocol
+  crate for a policy that is not protocol.
+- **The gate returns a proof.** `require_write_verified` returns `WriteVerified`, and every
+  guarded write asks for it, so none can run on a device the gate did not accept. It is not
+  `Clone`: the app asks the gate again for each device it opens.
+- **The caller keeps the backup.** Each write takes a `keep` step that runs after the read-only
+  capture and before any write: the CLI saves the backup to a new file there (never overwriting
+  one), the app will hold it in memory. The backup is returned on success, and inside
+  `GuardedWriteError::AfterBackup` when the write fails, so the caller always has the undo.
+- **What stays in the CLI:** sessions and `--record`, backup files, messages and undo commands,
+  and the mixed RGB and per-key rollback (`rgb mixed` has no app panel yet; #38 covers per-key).
+
+## 2026-11: Mock mode serves a stateful fake keyboard from `openkeychron-mock` (#122)
+
+The stateful fake behind `HidTransport` was chosen in Theo's brief for #122 on 2026-11-08;
+crate placement was left to the implementer. Replaying a
+fixture cannot show an edit: a later read returns the recorded bytes, and a write succeeds only
+if its exact bytes were recorded. So the app's mock mode also offers a fake keyboard that holds
+a keymap, encoder keys, macros and the Keychron settings, answers reads from them and applies
+writes. `OPENKEYCHRON_FIXTURE` still names a directory; a `*.mock.toml` file in it is one such
+keyboard, and every other `.toml` file is still a replayed fixture.
+
+- **New crate, not `openkeychron-hid`, `openkeychron-via` or `openkeychron-keychron`.** The fake
+  answers both VIA and Keychron requests, and neither protocol crate depends on the other (the
+  reason `openkeychron-guard` is its own crate). In `openkeychron-hid` it would put protocol
+  knowledge below the protocol crates. Not in `app/` either: it is protocol logic, tested on its
+  own, and the CLI's tests can use it too.
+- **Its own command constants.** It restates the VIA and Keychron IDs with their sources rather
+  than making the clients' constants public, so the clients' internals stay private.
+- **It refuses what it does not implement.** A request it has no answer for, one out of range, or
+  a value the firmware would silently change (a debounce time of 0, an asymmetric time over
+  127 ms) fails the transport write with a message naming it, rather than imitating
+  `id_unhandled`, which protocol code may read as "this firmware lacks the feature". Values the
+  firmware documents as refused get its status 1, as the firmware sends.
+- **Seeded in code, from the built-in layout.** The matrix size comes from the built-in registry;
+  keycodes and macros start at zero, like the hand-written fixtures; settings start at the
+  documented firmware defaults. The file holds only the device identity. Seeding from recorded
+  fixtures was rejected: each fixture records one command, so seeding would mean interpreting
+  replays.
+
+Rejected: a directory with one fixture per command. It lets one device answer every read
+panel, but still shows no edit on read-back.

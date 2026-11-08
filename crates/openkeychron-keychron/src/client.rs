@@ -10,6 +10,7 @@ const REPLY_TIMEOUT: Duration = Duration::from_millis(500);
 
 pub(crate) const GET_SUPPORT_FEATURE: u8 = 0xA2;
 pub(crate) const MISC_GROUP: u8 = 0xA7;
+pub(crate) const RGB_GROUP: u8 = 0xA8;
 const MISC_GET_PROTOCOL_VER: u8 = 0x01;
 
 /// A session speaking Keychron's raw HID commands over one VIA interface.
@@ -38,6 +39,9 @@ pub enum KeychronError {
     #[error("this firmware does not report support for {0}")]
     Unsupported(&'static str),
 
+    #[error("the keyboard speaks Keychron RGB protocol version {0}; this build reads version 1")]
+    UnknownRgbProtocol(u16),
+
     #[error("{0}")]
     Invalid(String),
 
@@ -58,6 +62,12 @@ impl Features {
     #[must_use]
     pub const fn snap_click(self) -> bool {
         self.0 & (1 << 6) != 0
+    }
+
+    /// Per-key and mixed RGB, the `0xA8` group.
+    #[must_use]
+    pub const fn keychron_rgb(self) -> bool {
+        self.0 & (1 << 7) != 0
     }
 }
 
@@ -111,31 +121,44 @@ impl<T: HidTransport> Keychron<T> {
         })
     }
 
-    /// One misc-group exchange (`A7 <sub> <arguments>`), checking the echoed sub-command and
-    /// the status byte.
+    /// One misc-group exchange (`A7 <sub> <arguments>`).
     pub(crate) fn misc(
         &mut self,
         sub: u8,
         arguments: &[u8],
     ) -> Result<[u8; REPORT_LEN], KeychronError> {
-        let mut request = vec![MISC_GROUP, sub];
+        self.group(MISC_GROUP, sub, arguments)
+    }
+
+    /// One exchange in a grouped command (`A7` or `A8`): `<group> <sub> <arguments>`, checking
+    /// the echoed sub-command and the status byte.
+    pub(crate) fn group(
+        &mut self,
+        group: u8,
+        sub: u8,
+        arguments: &[u8],
+    ) -> Result<[u8; REPORT_LEN], KeychronError> {
+        let mut request = vec![group, sub];
         request.extend_from_slice(arguments);
         let reply = self.exchange(&request)?;
         if reply[1] != sub {
             return Err(KeychronError::WrongReply {
-                expected: describe(MISC_GROUP, Some(sub)),
+                expected: describe(group, Some(sub)),
                 actual: describe(reply[0], Some(reply[1])),
             });
         }
         if reply[2] != 0 {
-            return Err(KeychronError::Refused(describe(MISC_GROUP, Some(sub))));
+            return Err(KeychronError::Refused(describe(group, Some(sub))));
         }
         Ok(reply)
     }
 
     /// Sends `request` padded to 32 bytes and checks the reply is for the same command.
     pub(crate) fn exchange(&mut self, request: &[u8]) -> Result<[u8; REPORT_LEN], KeychronError> {
-        let sub = request.get(1).copied().filter(|_| request[0] == MISC_GROUP);
+        let sub = request
+            .get(1)
+            .copied()
+            .filter(|_| matches!(request[0], MISC_GROUP | RGB_GROUP));
         let mut report = [0u8; REPORT_LEN];
         report[..request.len()].copy_from_slice(request);
         self.transport.write(&report)?;
