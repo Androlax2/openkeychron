@@ -2229,8 +2229,10 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 name = "openkeychron-app"
 version = "0.0.0"
 dependencies = [
+ "openkeychron-guard",
  "openkeychron-hid",
  "openkeychron-keychron",
+ "openkeychron-mock",
  "openkeychron-via",
  "serde",
  "serde_json",
@@ -2281,6 +2283,19 @@ version = "0.0.0"
 dependencies = [
  "openkeychron-hid",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "openkeychron-mock"
+version = "0.0.0"
+dependencies = [
+ "openkeychron-guard",
+ "openkeychron-hid",
+ "openkeychron-keychron",
+ "openkeychron-via",
+ "serde",
+ "thiserror 2.0.21",
+ "toml 1.1.8+spec-1.1.0",
 ]
 
 [[package]]

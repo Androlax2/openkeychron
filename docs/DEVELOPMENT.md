@@ -119,25 +119,47 @@ Set `OPENKEYCHRON_FIXTURE` to a directory of fixtures and the app talks to them 
 connected keyboards. Give an absolute path: a relative one is resolved from the app's working
 directory, not the repository root.
 
+For a whole UI session on one device, every panel and edits that read back, put a mock
+keyboard file in the directory:
+
 ```sh
 mkdir -p /tmp/openkeychron-mock
-cp fixtures/synthetic/cli-keymap.toml fixtures/synthetic/cli-settings-get.toml /tmp/openkeychron-mock/
+cp fixtures/synthetic/v5-max-iso.mock.toml /tmp/openkeychron-mock/
 OPENKEYCHRON_FIXTURE=/tmp/openkeychron-mock pnpm --dir app tauri dev
 ```
 
 - Each `.toml` file in the directory is one device, listed in file name order with the path
   `fixture:<directory>/<file>`. Other files are skipped. The app never looks for a keyboard in
   mock mode.
-- Every command replays its device's fixture from the start through `ReplayTransport`, like the
-  CLI's `--fixture`. A device therefore answers only the command its fixture recorded, as often
-  as the UI asks: `cli-keymap.toml` answers `read_keymap`, and any other command on it fails
-  with the replay's "write #0 sent …" error.
-- Writes are checked against the fixture in memory and go nowhere else: not to a keyboard, not
-  to the file, and not into the next command. A later read still returns what the fixture
-  recorded, not what was written.
+- A file named `*.mock.toml` is a mock keyboard: a stateful fake V5 Max ISO on a cable
+  (`crates/openkeychron-mock`). It answers `read_info`, `read_keymap`, `read_macros` and
+  `read_settings`, and a write (keymap, macros, debounce, Snap Click, wireless timers) changes
+  its state, so the next read shows it. It starts from a synthetic seed (four layers of zero
+  keycodes, sixteen empty macros, debounce 50 ms) each time the app starts, and never touches
+  the file. It answers no lighting command yet: a request it does not implement fails with
+  "the mock keyboard does not answer request …".
+- Any other `.toml` file is a fixture. Every command replays it from the start through
+  `ReplayTransport`, like the CLI's `--fixture`. A fixture device therefore answers only the
+  command it recorded, as often as the UI asks: `cli-keymap.toml` answers `read_keymap`, and
+  any other command on it fails with the replay's "write #0 sent …" error. Writes are checked
+  against the fixture in memory and go nowhere else: a later read still returns what the
+  fixture recorded.
 - The app refuses to start when the variable is empty, the directory cannot be read or holds
-  no `.toml` file, or a fixture is invalid or not from a Keychron VIA interface. The reason is
-  printed on stderr.
+  no `.toml` file, or a fixture or mock keyboard file is invalid or not from a Keychron VIA
+  interface. The reason is printed on stderr.
+
+A mock keyboard file holds only the identity it is listed under:
+
+```toml
+format_version = 1
+
+[device]
+name = "mock V5 Max ISO"
+vendor_id = 13364     # 0x3434
+product_id = 2385     # 0x0951: the model needs a built-in layout
+usage_page = 65376    # 0xff60
+usage = 97            # 0x61
+```
 
 ## Talking to the real keyboard (Linux)
 

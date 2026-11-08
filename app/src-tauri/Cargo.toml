@@ -14,12 +14,14 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 openkeychron-hid.workspace = true
 openkeychron-keychron = { path = "../../crates/openkeychron-keychron", version = "0.0.0" }
+openkeychron-mock = { path = "../../crates/openkeychron-mock", version = "0.0.0" }
 openkeychron-via = { path = "../../crates/openkeychron-via", version = "0.0.0" }
 serde.workspace = true
 tauri = { version = "2", features = [] }
 thiserror.workspace = true
 
 [dev-dependencies]
+openkeychron-guard = { path = "../../crates/openkeychron-guard", version = "0.0.0" }
 serde_json.workspace = true
 ts-rs = "=12.0.1"
 
