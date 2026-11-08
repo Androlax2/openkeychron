@@ -64,6 +64,18 @@ mod tests {
     }
 
     #[test]
+    fn a_failure_after_the_backup_reads_as_its_error() {
+        let mut via = Via::new(first_events("cli-keymap-set.toml", CAPTURE_EVENTS + 1));
+        let error = set_keycode(&mut via, &verified(), 0, key_2_1(), 0x0004, |_| {
+            Ok::<_, GuardError>(())
+        })
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(matches!(error, GuardedWriteError::AfterBackup { .. }));
+        assert_eq!(message, error.into_error().to_string());
+    }
+
+    #[test]
     fn set_keycode_refuses_a_missing_layer_before_the_backup() {
         let mut via = Via::new(first_events("cli-keymap-set.toml", CAPTURE_EVENTS));
         let result = set_keycode(&mut via, &verified(), 9, key_2_1(), 0x0004, refuse_to_keep);
@@ -112,10 +124,56 @@ mod tests {
     }
 
     #[test]
+    fn restore_sends_no_write_when_the_backup_is_not_kept() {
+        let mut via = Via::new(ReplayTransport::new(fixture("cli-keymap-restore.toml")));
+        let result = restore(&mut via, &verified(), &original_backup(), refuse_to_keep);
+        assert_eq!(
+            result,
+            Err(GuardedWriteError::NothingWritten(TestError::NotKept))
+        );
+        assert_stopped_after(
+            via.into_transport(),
+            "cli-keymap-restore.toml",
+            CAPTURE_EVENTS,
+        );
+    }
+
+    #[test]
+    fn restore_refuses_a_keyboard_with_another_layer_count() {
+        let mut wanted = original_backup();
+        wanted.layer_count = 2;
+        wanted.matrix = wanted.matrix.repeat(2);
+        wanted.encoders = [wanted.encoders.clone(), wanted.encoders].concat();
+        let mut via = Via::new(ReplayTransport::new(fixture("cli-keymap-restore.toml")));
+        let result = restore(&mut via, &verified(), &wanted, keep_nothing);
+        assert_eq!(
+            result,
+            Err(GuardedWriteError::NothingWritten(TestError::Guard(
+                GuardError::KeymapProfileMismatch
+            )))
+        );
+    }
+
+    #[test]
     fn reset_returns_the_keymap_from_before_the_reset() {
         let mut via = Via::new(ReplayTransport::new(fixture("cli-keymap-reset.toml")));
         let previous = reset(&mut via, &verified(), keep_nothing);
         assert_eq!(previous, Ok(original_backup()));
         via.into_transport().finish().unwrap();
+    }
+
+    #[test]
+    fn reset_sends_no_write_when_the_backup_is_not_kept() {
+        let mut via = Via::new(ReplayTransport::new(fixture("cli-keymap-reset.toml")));
+        let result = reset(&mut via, &verified(), refuse_to_keep);
+        assert_eq!(
+            result,
+            Err(GuardedWriteError::NothingWritten(TestError::NotKept))
+        );
+        assert_stopped_after(
+            via.into_transport(),
+            "cli-keymap-reset.toml",
+            CAPTURE_EVENTS,
+        );
     }
 }

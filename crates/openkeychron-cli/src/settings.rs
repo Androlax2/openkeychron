@@ -133,20 +133,19 @@ pub fn run(
         ));
     }
     let session = Session::start(fixture, record, device)?;
-    let verified = match action {
-        SettingsAction::Get => None,
-        SettingsAction::Set { .. } => {
-            Some(require_write_verified("settings writes", session.device())?)
+    let keychron = match action {
+        SettingsAction::Get => {
+            let mut keychron = Keychron::new(session);
+            get(&mut keychron, json)?;
+            keychron
+        }
+        SettingsAction::Set { backup, setting } => {
+            let verified = require_write_verified("settings writes", session.device())?;
+            let mut keychron = Keychron::new(session);
+            set(&mut keychron, &verified, backup, setting)?;
+            keychron
         }
     };
-    let mut keychron = Keychron::new(session);
-    let result = match (action, &verified) {
-        (SettingsAction::Set { backup, setting }, Some(verified)) => {
-            set(&mut keychron, verified, backup, setting)
-        }
-        _ => get(&mut keychron, json),
-    };
-    result?;
     keychron.into_transport().finish()
 }
 

@@ -6,19 +6,18 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
-use openkeychron_hid::KeychronDevice;
-use openkeychron_keychron::{
-    FirmwareVersion, Keychron, KeychronError, MatrixSize, MixedEffect, MixedRgb,
-};
-use openkeychron_via::V5_MAX_FR_ISO;
-use serde::{Deserialize, Serialize};
-
 use openkeychron_guard::keymap::BackupDevice;
 use openkeychron_guard::rgb::{MixedReader, write_mixed};
 use openkeychron_guard::{
     GuardedWriteError, WriteVerified, require_write_verified, write_verified_model,
     write_verified_models_text,
 };
+use openkeychron_hid::KeychronDevice;
+use openkeychron_keychron::{
+    FirmwareVersion, Keychron, KeychronError, MatrixSize, MixedEffect, MixedRgb,
+};
+use openkeychron_via::V5_MAX_FR_ISO;
+use serde::{Deserialize, Serialize};
 
 use crate::backup_file;
 use crate::rgb::{KeyPosition, resolve_key};

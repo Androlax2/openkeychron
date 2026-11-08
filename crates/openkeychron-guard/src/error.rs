@@ -82,13 +82,16 @@ pub enum GuardError {
     RestoredMacrosDisabled,
 }
 
-/// A guarded write that failed, and whether the keyboard may have changed.
-#[derive(Debug, PartialEq, Eq)]
+/// A guarded write that failed, and whether the keyboard may have changed. Its message is the
+/// error's alone.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum GuardedWriteError<Backup, E> {
     /// The capture or `keep` failed, so no write was sent.
+    #[error("{0}")]
     NothingWritten(E),
     /// `keep` stored `backup`, then the write or its read-back failed: the keyboard may have
     /// changed, and restoring `backup` undoes it. Boxed, because a whole keymap is large.
+    #[error("{error}")]
     AfterBackup { error: E, backup: Box<Backup> },
 }
 

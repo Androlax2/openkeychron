@@ -253,8 +253,9 @@ Decided by Theo on 2026-11-07, from three proposed designs. Mixed RGB gets four 
 Every write asks the built-in registry first (cable, write-verified model), then captures the
 whole mixed state (every LED's region and every region's effect list) through a read-only
 wrapper and saves it to a new file that is read back before anything is sent
-(`rgb_guarded_write::write_mixed`, now `openkeychron_guard::rgb::write_mixed`). It then sets the whole state with read-back and saves it
-(`A8 02`); if any request fails, the save included, it sets the previous state again.
+(`rgb_guarded_write::write_mixed`, now `openkeychron_guard::rgb::write_mixed`). It then sets
+the whole state with read-back and saves it (`A8 02`); if any request fails, the save
+included, it sets the previous state again.
 `restore` saves its own pre-restore backup and refuses a backup for another model or another
 LED, region or slot count. Like the keymap and macro writes, these refuse `--record`, so a
 recording cannot overwrite a backup.
@@ -280,16 +281,18 @@ restorable only by editing its JSON by hand.
 
 ## 2026-11: The guarded write path lives in its own crate, `openkeychron-guard` (#119)
 
-Placement left to the implementer by Theo on 2026-11-08. The CLI and the app write through one library, so the app (#37, #38) cannot skip a step the
-CLI takes. It holds the write-verified gate, the read-only capture wrappers, the keymap and macro
-backups with their read-back, and keymap/macro set, restore and reset.
+Placement left to the implementer by Theo on 2026-11-08. The CLI and the app write through
+one library, so the app (#37, #38) cannot skip a step the CLI takes. It holds the
+write-verified gate, the read-only capture wrappers, the keymap and macro backups with their
+read-back, and keymap/macro set, restore and reset.
 
 - **New crate, not `openkeychron-via` or `openkeychron-keychron`.** The path needs both: the
   registry and keymap/macro writes are in `via`, per-key, mixed RGB and settings in `keychron`,
   and neither depends on the other. Putting it in either would add that dependency to a protocol
   crate for a policy that is not protocol.
 - **The gate returns a proof.** `require_write_verified` returns `WriteVerified`, and every
-  guarded write asks for it, so none can run on a device the gate did not accept.
+  guarded write asks for it, so none can run on a device the gate did not accept. It is not
+  `Clone`: the app asks the gate again for each device it opens.
 - **The caller keeps the backup.** Each write takes a `keep` step that runs after the read-only
   capture and before any write: the CLI saves the backup to a new file there (never overwriting
   one), the app will hold it in memory. The backup is returned on success, and inside

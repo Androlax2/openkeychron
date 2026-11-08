@@ -7,8 +7,10 @@ use openkeychron_via::{DeviceRegistry, RegisteredModel, WriteAccess};
 use crate::GuardError;
 
 /// Proof that [`require_write_verified`] accepted the device. Every guarded write asks for it,
-/// so none can run on a device the gate did not check.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// so none can run on a device the gate did not check. It names the device, not one opened
+/// connection to it: ask the gate again for each device you open. It is not `Clone`, so a copy
+/// cannot outlive that check.
+#[derive(Debug, PartialEq, Eq)]
 pub struct WriteVerified {
     device: KeychronDevice,
 }
