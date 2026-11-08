@@ -299,3 +299,34 @@ read-back, and keymap/macro set, restore and reset.
   `GuardedWriteError::AfterBackup` when the write fails, so the caller always has the undo.
 - **What stays in the CLI:** sessions and `--record`, backup files, messages and undo commands,
   and the mixed RGB and per-key rollback (`rgb mixed` has no app panel yet; #38 covers per-key).
+
+## 2026-11: Mock mode serves a stateful fake keyboard from `openkeychron-mock` (#122)
+
+The stateful fake behind `HidTransport` was chosen in Theo's brief for #122 on 2026-11-08;
+crate placement was left to the implementer. Replaying a
+fixture cannot show an edit: a later read returns the recorded bytes, and a write succeeds only
+if its exact bytes were recorded. So the app's mock mode also offers a fake keyboard that holds
+a keymap, encoder keys, macros and the Keychron settings, answers reads from them and applies
+writes. `OPENKEYCHRON_FIXTURE` still names a directory; a `*.mock.toml` file in it is one such
+keyboard, and every other `.toml` file is still a replayed fixture.
+
+- **New crate, not `openkeychron-hid`, `openkeychron-via` or `openkeychron-keychron`.** The fake
+  answers both VIA and Keychron requests, and neither protocol crate depends on the other (the
+  reason `openkeychron-guard` is its own crate). In `openkeychron-hid` it would put protocol
+  knowledge below the protocol crates. Not in `app/` either: it is protocol logic, tested on its
+  own, and the CLI's tests can use it too.
+- **Its own command constants.** It restates the VIA and Keychron IDs with their sources rather
+  than making the clients' constants public, so the clients' internals stay private.
+- **It refuses what it does not implement.** A request it has no answer for, one out of range, or
+  a value the firmware would silently change (a debounce time of 0, an asymmetric time over
+  127 ms) fails the transport write with a message naming it, rather than imitating
+  `id_unhandled`, which protocol code may read as "this firmware lacks the feature". Values the
+  firmware documents as refused get its status 1, as the firmware sends.
+- **Seeded in code, from the built-in layout.** The matrix size comes from the built-in registry;
+  keycodes and macros start at zero, like the hand-written fixtures; settings start at the
+  documented firmware defaults. The file holds only the device identity. Seeding from recorded
+  fixtures was rejected: each fixture records one command, so seeding would mean interpreting
+  replays.
+
+Rejected: a directory with one fixture per command. It lets one device answer every read
+panel, but still shows no edit on read-back.

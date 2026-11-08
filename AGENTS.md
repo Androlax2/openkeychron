@@ -34,6 +34,7 @@ before touching its area:
 | `crates/openkeychron-via` | VIA protocol: versions, keymap, layers, macros (M1, M2) |
 | `crates/openkeychron-keychron` | Keychron-specific commands: RGB, debounce, LKP, wireless timers (M3) |
 | `crates/openkeychron-guard` | The guarded write path the CLI and the app share: write-verified gate, read-only capture, backup kept by the caller before any write, read-back |
+| `crates/openkeychron-mock` | A stateful fake keyboard behind `HidTransport`: the app's mock mode and end-to-end write tests |
 | `crates/openkeychron-cli` | The `openkeychron` binary (M1) |
 | `app/` | Tauri + SvelteKit desktop app (M4); calls the crates, holds no HID logic |
 

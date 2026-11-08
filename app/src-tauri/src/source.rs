@@ -1,26 +1,35 @@
 //! Where the commands find devices: the connected keyboards, or, in mock mode, the fixtures in
 //! the directory `OPENKEYCHRON_FIXTURE` names.
 //!
-//! In mock mode each `.toml` fixture in that directory is one device. Every command on it
-//! replays the fixture from its start through a `ReplayTransport`, the way the CLI's
-//! `--fixture` does, so the UI can read a device as often as it likes. A write is checked
-//! against the fixture in memory and goes nowhere else: not to a keyboard, not to the file,
-//! and not into the next command.
+//! In mock mode each `.toml` file in that directory is one device:
+//!
+//! - A mock keyboard file (`*.mock.toml`) is a stateful fake keyboard, a `MockKeyboard`. It
+//!   answers every read command from its state, and a write changes that state, so the next
+//!   command reads it back. The state lives in memory until the app quits.
+//! - Any other `.toml` file is a fixture. Every command on it replays the fixture from its start
+//!   through a `ReplayTransport`, the way the CLI's `--fixture` does, so the UI can read a device
+//!   as often as it likes. A write is checked against the fixture in memory and goes nowhere
+//!   else: not to a keyboard, not to the file, and not into the next command.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use openkeychron_hid::{
-    Fixture, FixtureError, HidInterface, HidTransport, HidapiTransport, KeychronDevice,
-    ReplayTransport, TransportError, keychron_via_interfaces,
+    DeviceIdentity, Fixture, FixtureError, HidInterface, HidTransport, HidapiTransport,
+    KeychronDevice, ReplayTransport, TransportError, keychron_via_interfaces,
 };
+use openkeychron_mock::{MockError, MockKeyboard, MockTransport};
 
 use crate::device;
 use crate::error::CommandError;
 
 /// The environment variable that turns mock mode on.
 pub const FIXTURE_VARIABLE: &str = "OPENKEYCHRON_FIXTURE";
+
+/// The file name ending that makes a `.toml` file a mock keyboard rather than a fixture. A mock
+/// keyboard file also parses as a fixture without events, so the name decides.
+const MOCK_SUFFIX: &str = ".mock.toml";
 
 #[derive(Debug)]
 pub enum DeviceSource {
@@ -31,7 +40,14 @@ pub enum DeviceSource {
 #[derive(Debug)]
 pub struct FixtureDevice {
     device: KeychronDevice,
-    fixture: Fixture,
+    answers: Answers,
+}
+
+/// What answers a mock mode device's commands.
+#[derive(Debug)]
+enum Answers {
+    Replay(Fixture),
+    Mock(MockKeyboard),
 }
 
 /// Why mock mode could not start. The app refuses to open rather than fall back to the
@@ -62,6 +78,9 @@ pub enum SourceError {
     #[error("{path}: {source}")]
     Fixture { path: PathBuf, source: FixtureError },
 
+    #[error("{path}: {source}")]
+    Mock { path: PathBuf, source: MockError },
+
     #[error(
         "{path} was not recorded from a Keychron VIA interface ({vendor_id:04x}:{product_id:04x}, \
          usage page 0x{usage_page:04x}, usage 0x{usage:02x})"
@@ -75,11 +94,13 @@ pub enum SourceError {
     },
 }
 
-/// What a command reads and writes through: a keyboard, or a fixture's in-memory replay.
+/// What a command reads and writes through: a keyboard, a fixture's in-memory replay, or a mock
+/// keyboard.
 #[derive(Debug)]
 pub enum Transport {
     Hardware(HidapiTransport),
     Fixture(ReplayTransport),
+    Mock(MockTransport),
 }
 
 impl HidTransport for Transport {
@@ -87,6 +108,7 @@ impl HidTransport for Transport {
         match self {
             Self::Hardware(transport) => transport.write(report),
             Self::Fixture(transport) => transport.write(report),
+            Self::Mock(transport) => transport.write(report),
         }
     }
 
@@ -94,6 +116,7 @@ impl HidTransport for Transport {
         match self {
             Self::Hardware(transport) => transport.read(timeout),
             Self::Fixture(transport) => transport.read(timeout),
+            Self::Mock(transport) => transport.read(timeout),
         }
     }
 }
@@ -108,8 +131,9 @@ impl DeviceSource {
         }
     }
 
-    /// One device per `.toml` file in `directory`, in file name order. Other files are
-    /// skipped, so a directory can also hold backups and notes.
+    /// One device per `.toml` file in `directory`, in file name order: a mock keyboard for a
+    /// `*.mock.toml` file, a fixture for any other. Other files are skipped, so a directory can
+    /// also hold backups and notes.
     pub fn fixtures(directory: &Path) -> Result<Self, SourceError> {
         let read_error = |source| SourceError::ReadDirectory {
             directory: directory.to_owned(),
@@ -163,8 +187,13 @@ impl DeviceSource {
                 else {
                     return Err(device::not_connected(&self.list()?, path));
                 };
-                let replay = ReplayTransport::new(fixture_device.fixture.clone());
-                Ok((fixture_device.device.clone(), Transport::Fixture(replay)))
+                let transport = match &fixture_device.answers {
+                    Answers::Replay(fixture) => {
+                        Transport::Fixture(ReplayTransport::new(fixture.clone()))
+                    }
+                    Answers::Mock(keyboard) => Transport::Mock(keyboard.connect()),
+                };
+                Ok((fixture_device.device.clone(), transport))
             }
         }
     }
@@ -172,6 +201,20 @@ impl DeviceSource {
 
 impl FixtureDevice {
     fn load(path: &Path) -> Result<Self, SourceError> {
+        let is_mock = path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().ends_with(MOCK_SUFFIX));
+        if is_mock {
+            let keyboard = MockKeyboard::load(path).map_err(|source| SourceError::Mock {
+                path: path.to_owned(),
+                source,
+            })?;
+            let device = listed_device(path, keyboard.identity())?;
+            return Ok(Self {
+                device,
+                answers: Answers::Mock(keyboard),
+            });
+        }
         // `FixtureError::Read` keeps the I/O reason as its source, which a message alone drops.
         let fixture = Fixture::load(path).map_err(|error| match error {
             FixtureError::Read { path, source } => SourceError::ReadFixture { path, source },
@@ -180,26 +223,33 @@ impl FixtureDevice {
                 source: other,
             },
         })?;
-        let identity = &fixture.device;
-        let interface = HidInterface {
-            name: Some(identity.name.clone()),
+        let device = listed_device(path, &fixture.device)?;
+        Ok(Self {
+            device,
+            answers: Answers::Replay(fixture),
+        })
+    }
+}
+
+/// The device the file at `path` is listed as: the Keychron VIA interface `identity` names.
+fn listed_device(path: &Path, identity: &DeviceIdentity) -> Result<KeychronDevice, SourceError> {
+    let interface = HidInterface {
+        name: Some(identity.name.clone()),
+        vendor_id: identity.vendor_id,
+        product_id: identity.product_id,
+        usage_page: identity.usage_page,
+        usage: identity.usage,
+        path: format!("fixture:{}", path.display()),
+    };
+    keychron_via_interfaces([interface])
+        .pop()
+        .ok_or_else(|| SourceError::NotKeychronVia {
+            path: path.to_owned(),
             vendor_id: identity.vendor_id,
             product_id: identity.product_id,
             usage_page: identity.usage_page,
             usage: identity.usage,
-            path: format!("fixture:{}", path.display()),
-        };
-        let device = keychron_via_interfaces([interface]).pop().ok_or_else(|| {
-            SourceError::NotKeychronVia {
-                path: path.to_owned(),
-                vendor_id: identity.vendor_id,
-                product_id: identity.product_id,
-                usage_page: identity.usage_page,
-                usage: identity.usage,
-            }
-        })?;
-        Ok(Self { device, fixture })
-    }
+        })
 }
 
 #[cfg(test)]
@@ -208,11 +258,15 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::Duration;
 
+    use openkeychron_guard::keymap::{self as guarded_keymap, KeyPosition, KeymapBackup};
+    use openkeychron_guard::{GuardError, require_write_verified};
     use openkeychron_hid::{Event, HidTransport, TransportError};
+    use openkeychron_via::Via;
 
     use super::{DeviceSource, Transport};
-    use crate::keymap;
+    use crate::info::{self, KeychronFirmware};
     use crate::test_support::{load_fixture, synthetic_path};
+    use crate::{keymap, macros, settings};
 
     const TIMEOUT: Duration = Duration::from_millis(100);
 
@@ -260,6 +314,7 @@ mod tests {
         match transport {
             Transport::Fixture(replay) => replay,
             Transport::Hardware(_) => panic!("mock mode opened a keyboard"),
+            Transport::Mock(_) => panic!("a fixture opened as a mock keyboard"),
         }
     }
 
@@ -478,6 +533,167 @@ mod tests {
             replay.write(&[0x05, 0x00, 0x02, 0x01, 0x00, 0x04]),
             Err(TransportError::UnexpectedWrite { position: 0, .. })
         ));
+    }
+
+    const MOCK: &str = "v5-max-iso.mock.toml";
+    const KEYS_PER_LAYER: usize = 6 * 19;
+    /// Row 2, column 1: the key labelled `A` on the FR ISO layout.
+    const ROW: u8 = 2;
+    const COLUMN: u8 = 1;
+    const KC_A: u16 = 0x0004;
+    const KC_B: u16 = 0x0005;
+
+    fn mock_directory(test: &str) -> (FixtureDirectory, DeviceSource, String) {
+        let directory = FixtureDirectory::new(test).with_synthetic("keyboard.mock.toml", MOCK);
+        let source = DeviceSource::fixtures(directory.path()).unwrap();
+        let path = directory.device_path("keyboard.mock.toml");
+        (directory, source, path)
+    }
+
+    fn keycode_at(source: &DeviceSource, path: &str) -> u16 {
+        let (device, transport) = source.open(path).unwrap();
+        keymap::read(transport, &device).unwrap().layers[0].keys
+            [usize::from(ROW) * 19 + usize::from(COLUMN)]
+        .keycode
+    }
+
+    /// Sets the key at `ROW`, `COLUMN` on layer 0 the way the app's keymap write will: through
+    /// the guarded write path, on a newly opened device. Returns the backup, its undo.
+    fn set_keycode(source: &DeviceSource, path: &str, keycode: u16) -> KeymapBackup {
+        let (device, transport) = source.open(path).unwrap();
+        let verified = require_write_verified("keymap writes", &device).unwrap();
+        guarded_keymap::set_keycode::<_, GuardError>(
+            &mut Via::new(transport),
+            &verified,
+            0,
+            KeyPosition::new(ROW, COLUMN).unwrap(),
+            keycode,
+            |_| Ok(()),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_mock_keyboard_file_lists_as_one_cabled_device_under_its_name() {
+        let (directory, source, _) = mock_directory("mock-list");
+        let devices = source.list().unwrap();
+        assert_eq!(
+            devices
+                .iter()
+                .map(|device| (
+                    device.name.as_deref(),
+                    device.path.clone(),
+                    device.is_receiver
+                ))
+                .collect::<Vec<_>>(),
+            [(
+                Some("mock V5 Max ISO"),
+                directory.device_path("keyboard.mock.toml"),
+                false
+            )]
+        );
+    }
+
+    #[test]
+    fn one_mock_device_answers_every_read_command() {
+        let (_directory, source, path) = mock_directory("mock-reads");
+        let (device, transport) = source.open(&path).unwrap();
+        let info = info::read(transport, &device).unwrap();
+        let (device, transport) = source.open(&path).unwrap();
+        let keymap = keymap::read(transport, &device).unwrap();
+        let (device, transport) = source.open(&path).unwrap();
+        let macros = macros::read(transport, &device).unwrap();
+        let (_, transport) = source.open(&path).unwrap();
+        let settings = settings::read(transport).unwrap();
+        assert_eq!(
+            (
+                info.keychron_firmware,
+                keymap.layer_count,
+                keymap.layers[3].keys.len(),
+                macros.macro_count,
+                settings.debounce.time_ms,
+            ),
+            (
+                KeychronFirmware::Reported {
+                    version: "v0.0.0".to_owned(),
+                    build_date: "mock".to_owned(),
+                },
+                4,
+                KEYS_PER_LAYER,
+                16,
+                50
+            )
+        );
+    }
+
+    #[test]
+    fn a_guarded_keymap_write_on_a_mock_device_shows_in_the_next_read_keymap() {
+        let (_directory, source, path) = mock_directory("mock-write");
+        set_keycode(&source, &path, KC_A);
+        assert_eq!(keycode_at(&source, &path), KC_A);
+    }
+
+    #[test]
+    fn restoring_the_backup_of_a_mock_keymap_write_shows_the_old_key_again() {
+        let (_directory, source, path) = mock_directory("mock-undo");
+        // A non-zero key, so a restore that wrote the zero seed back would not pass.
+        set_keycode(&source, &path, KC_B);
+        let backup = set_keycode(&source, &path, KC_A);
+        let (device, transport) = source.open(&path).unwrap();
+        let verified = require_write_verified("keymap writes", &device).unwrap();
+        guarded_keymap::restore::<_, GuardError>(
+            &mut Via::new(transport),
+            &verified,
+            &backup,
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(keycode_at(&source, &path), KC_B);
+    }
+
+    #[test]
+    fn each_mock_device_keeps_its_own_state() {
+        let directory = FixtureDirectory::new("mock-two")
+            .with_synthetic("a.mock.toml", MOCK)
+            .with_synthetic("b.mock.toml", MOCK);
+        let source = DeviceSource::fixtures(directory.path()).unwrap();
+        set_keycode(&source, &directory.device_path("a.mock.toml"), KC_A);
+        assert_eq!(
+            keycode_at(&source, &directory.device_path("b.mock.toml")),
+            0
+        );
+    }
+
+    #[test]
+    fn refuses_an_invalid_mock_keyboard_file_and_names_it() {
+        let directory = FixtureDirectory::new("mock-invalid")
+            .with_file("broken.mock.toml", "format_version = 1\n");
+        let error = DeviceSource::fixtures(directory.path()).unwrap_err();
+        assert!(
+            error.to_string().starts_with(&format!(
+                "{}: invalid mock keyboard: ",
+                directory.path().join("broken.mock.toml").display()
+            )),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn refuses_a_mock_keyboard_for_a_model_without_a_built_in_layout_and_names_it() {
+        let other_model = std::fs::read_to_string(synthetic_path(MOCK))
+            .unwrap()
+            .replace("product_id = 2385", "product_id = 2384");
+        let directory =
+            FixtureDirectory::new("mock-model").with_file("other.mock.toml", &other_model);
+        let error = DeviceSource::fixtures(directory.path()).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "{}: this build has no keyboard layout for 3434:0950, so a mock keyboard cannot \
+                 size its keymap",
+                directory.path().join("other.mock.toml").display()
+            )
+        );
     }
 
     #[test]
