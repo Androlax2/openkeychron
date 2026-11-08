@@ -33,15 +33,17 @@ pub enum GuardError {
     #[error(transparent)]
     Keychron(#[from] KeychronError),
 
-    #[error("{mismatch}; the previous colour is set again and nothing was saved")]
-    PerKeyColorRolledBack { mismatch: KeychronError },
+    /// `failure` is why the new colour is not known to be set: a read-back mismatch, or a
+    /// failed `A8 0A` exchange or `A8 09` read-back (timeout, wrong reply, refusal, I/O error).
+    #[error("{failure}; the previous colour is set again and nothing was saved")]
+    PerKeyColorRolledBack { failure: KeychronError },
 
     #[error(
-        "{mismatch}; setting the previous colour again also failed ({restore}); nothing was \
+        "{failure}; setting the previous colour again also failed ({restore}); nothing was \
          saved, and unplugging the keyboard drops the change"
     )]
     PerKeyColorRollbackFailed {
-        mismatch: KeychronError,
+        failure: KeychronError,
         restore: KeychronError,
     },
 
