@@ -77,6 +77,11 @@ impl From<GuardError> for SessionError {
             // The gate refuses receivers before any guarded write, so no receiver caveat applies.
             GuardError::Via(error) => Self::via(&error, false),
             GuardError::Keychron(error) => Self::from(error),
+            // Device failures after a write was sent, as `rgb key` has always reported them.
+            rolled_back @ (GuardError::PerKeyColorRolledBack { .. }
+            | GuardError::PerKeyColorRollbackFailed { .. }) => {
+                Self::Keychron(rolled_back.to_string())
+            }
             GuardError::MacrosDisabled => Self::Usage(
                 "the macro buffer's last byte is not 0, so an earlier write did not finish and \
                  its content is unknown; run `openkeychron macro restore` with a backup first"

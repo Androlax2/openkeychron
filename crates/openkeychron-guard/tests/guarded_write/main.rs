@@ -6,4 +6,5 @@ mod support;
 mod gate;
 mod keymap;
 mod macros;
+mod per_key_color;
 mod rgb_and_settings;
