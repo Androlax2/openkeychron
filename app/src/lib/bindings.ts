@@ -51,7 +51,12 @@ bounds: Bounds | null,
 /**
  * A second rectangle that, with `bounds`, makes a shape such as ISO Enter.
  */
-secondaryBounds: Bounds | null, keycode: number, };
+secondaryBounds: Bounds | null, keycode: number, 
+/**
+ * QMK's name for `keycode`, such as `LCTL(C)`. Absent for a custom or unknown keycode:
+ * show `keycode` then.
+ */
+name: string | null, };
 
 export type Bounds = { x: number, y: number, width: number, height: number, };
 

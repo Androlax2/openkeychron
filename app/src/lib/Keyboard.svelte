@@ -14,6 +14,12 @@ let { keymap }: { keymap: Keymap } = $props();
 
 // The gap between neighbouring keycaps, taken off each side of a key's rectangle.
 const INSET = 3;
+// Where legends start inside a key: the same distance from the key's left and right edges.
+const LEGEND_MARGIN = 10;
+// The keycode label's size, as in the style block, and a generous width for one of its
+// characters, so a name estimated to fit does fit.
+const KEYCODE_FONT_SIZE = 9;
+const KEYCODE_CHARACTER_WIDTH = 6;
 
 const id = $props.id();
 let layerPosition = $state(0);
@@ -32,7 +38,7 @@ const selectedKey = $derived(placedKeys.find((key) => isAt(key, selected)) ?? nu
 const selectionSummary = $derived(
   selectedKey === null
     ? "No key selected."
-    : `Selected: ${baseLegend(selectedKey)} (row ${selectedKey.row}, column ${selectedKey.column}), keycode ${hex(selectedKey.keycode)}`,
+    : `Selected: ${baseLegend(selectedKey)} (row ${selectedKey.row}, column ${selectedKey.column}), keycode ${describeKeycode(selectedKey)}`,
 );
 
 function farRight(key: PlacedKey): number {
@@ -67,6 +73,27 @@ function hex(keycode: number): string {
   return `0x${keycode.toString(16).padStart(4, "0")}`;
 }
 
+/** QMK's name with the raw value, or only the raw value of a keycode without a name. */
+function describeKeycode(key: Key): string {
+  return key.name === null ? hex(key.keycode) : `${key.name} (${hex(key.keycode)})`;
+}
+
+/** The keycap shows the name, or the raw value of a custom or unknown keycode. */
+function keycodeLabel(key: Key): string {
+  return key.name ?? hex(key.keycode);
+}
+
+/**
+ * A smaller font size for a keycode label that would run past the keycap's edge, such as
+ * "LT(1, SPC)" on a 1u key; null when it fits. Shrinking, unlike SVG's textLength, never
+ * stretches a label the estimate made too wide.
+ */
+function shrunkFontSize(key: PlacedKey): number | null {
+  const available = key.bounds.width * KEY_UNIT - 2 * LEGEND_MARGIN;
+  const estimated = keycodeLabel(key).length * KEYCODE_CHARACTER_WIDTH;
+  return estimated > available ? (KEYCODE_FONT_SIZE * available) / estimated : null;
+}
+
 /** The base legend, or the matrix position for a layout that has no legends. */
 function baseLegend(key: Key): string {
   return key.legend ?? `${key.row},${key.column}`;
@@ -86,7 +113,7 @@ function accessibleName(key: Key): string {
     baseLegend(key),
     key.shiftLegend === null ? null : `Shift ${key.shiftLegend}`,
     key.altGrLegend === null ? null : `AltGr ${key.altGrLegend}`,
-    `keycode ${hex(key.keycode)}`,
+    `keycode ${describeKeycode(key)}`,
   ]
     .filter((part) => part !== null)
     .join(", ");
@@ -161,6 +188,7 @@ function onTabKeydown(event: KeyboardEvent): void {
             {@const rectangles = capRectangles(key)}
             {@const isSelected = isAt(key, selected)}
             {@const lines = legendLines(key)}
+            {@const keycodeFontSize = shrunkFontSize(key)}
             <g
               role="option"
               class="key"
@@ -206,8 +234,13 @@ function onTabKeydown(event: KeyboardEvent): void {
                   {key.altGrLegend}
                 </text>
               {/if}
-              <text class="keycode" x="10" y={key.bounds.height * KEY_UNIT - 10}>
-                {hex(key.keycode)}
+              <text
+                class="keycode"
+                x={LEGEND_MARGIN}
+                y={key.bounds.height * KEY_UNIT - 10}
+                style:font-size={keycodeFontSize === null ? null : `${keycodeFontSize}px`}
+              >
+                {keycodeLabel(key)}
               </text>
             </g>
           {/each}

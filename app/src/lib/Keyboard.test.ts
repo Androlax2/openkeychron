@@ -114,9 +114,26 @@ describe("Keyboard", () => {
     expect(texts).toEqual(expect.arrayContaining(["é", "2", "~"]));
   });
 
-  it("shows the keycode the shown layer assigns to each key", () => {
+  it("shows the QMK name of the keycode the shown layer assigns to each key", () => {
     const view = render();
-    expect(keyNamed(view, "A").querySelector("text.keycode")?.textContent).toBe("0x0009");
+    expect(keyNamed(view, "A").querySelector("text.keycode")?.textContent?.trim()).toBe("Q");
+  });
+
+  it("shows a keycode without a name as its raw hexadecimal value", () => {
+    const view = render();
+    expect(keyNamed(view, "E").querySelector("text.keycode")?.textContent?.trim()).toBe("0x7e00");
+  });
+
+  it("gives the keycode's name and raw value in the key's accessible name", () => {
+    const view = render();
+    expect(keyNamed(view, "A").getAttribute("aria-label")).toBe("A, keycode Q (0x0014)");
+  });
+
+  it("leaves a keycode name that fits its keycap at its normal size", () => {
+    const view = render();
+    expect(keyNamed(view, "A").querySelector<SVGTextElement>("text.keycode")?.style.fontSize).toBe(
+      "",
+    );
   });
 
   it("selects a key when it is clicked", () => {
@@ -129,7 +146,15 @@ describe("Keyboard", () => {
     const view = render();
     click(keyNamed(view, "é"));
     expect(view.querySelector(".selection")?.textContent?.trim()).toBe(
-      "Selected: é (row 0, column 1), keycode 0x0005",
+      "Selected: é (row 0, column 1), keycode 2 (0x001f)",
+    );
+  });
+
+  it("gives only the raw value of a selected key's keycode without a name", () => {
+    const view = render();
+    click(keyNamed(view, "E"));
+    expect(view.querySelector(".selection")?.textContent?.trim()).toBe(
+      "Selected: E (row 1, column 2), keycode 0x7e00",
     );
   });
 
@@ -194,7 +219,21 @@ describe("Keyboard", () => {
       throw new Error("no second layer tab");
     }
     click(secondLayer);
-    expect(keyNamed(view, "A").querySelector("text.keycode")?.textContent).toBe("0x0105");
+    expect(keyNamed(view, "A").querySelector("text.keycode")?.textContent?.trim()).toBe(
+      "LT(1, SPC)",
+    );
+  });
+
+  it("shrinks a keycode name wider than its keycap to fit the keycap", () => {
+    const view = render();
+    const [, secondLayer] = layerTabs(view);
+    if (secondLayer === undefined) {
+      throw new Error("no second layer tab");
+    }
+    click(secondLayer);
+    const keycode = keyNamed(view, "A").querySelector<SVGTextElement>("text.keycode");
+    // "LT(1, SPC)": an estimated 10 × 6px in the 40px between the 1u key's 10px margins.
+    expect(keycode?.style.fontSize).toBe(`${(9 * 40) / 60}px`);
   });
 
   it("moves between layer tabs with the arrow keys", () => {
