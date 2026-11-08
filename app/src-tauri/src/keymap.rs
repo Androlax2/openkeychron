@@ -3,7 +3,9 @@
 //! Only reads.
 
 use openkeychron_hid::{HidTransport, KeychronDevice};
-use openkeychron_via::{DeviceRegistry, Keycode, Legends, Rectangle, RegisteredLayout, Via};
+use openkeychron_via::{
+    DeviceRegistry, Keycode, Legends, Rectangle, RegisteredLayout, RegisteredModel, Via,
+};
 use serde::Serialize;
 
 use crate::error::CommandError;
@@ -47,8 +49,9 @@ pub struct Key {
     /// A second rectangle that, with `bounds`, makes a shape such as ISO Enter.
     pub secondary_bounds: Option<Bounds>,
     pub keycode: u16,
-    /// QMK's name for `keycode`, such as `LCTL(C)`. Absent for a custom or unknown keycode:
-    /// show `keycode` then.
+    /// QMK's name for `keycode`, such as `LCTL(C)`, or the connected model's name for a
+    /// Keychron custom keycode, such as `LOPTN`. Absent for any other custom or unknown
+    /// keycode: show `keycode` then.
     pub name: Option<String>,
 }
 
@@ -107,13 +110,14 @@ pub fn read<T: HidTransport>(
         });
     }
     let registry = DeviceRegistry::built_in();
-    let layout =
+    let model =
         registry
-            .layout(device.vendor_id, device.product_id)
+            .model(device.vendor_id, device.product_id)
             .ok_or(CommandError::NoLayout {
                 vendor_id: device.vendor_id,
                 product_id: device.product_id,
             })?;
+    let layout = model.layout();
     let mut via = Via::new(transport);
     let via_error = |error| CommandError::via(&error, device.is_receiver);
     let layer_count = via.layer_count().map_err(via_error)?;
@@ -125,7 +129,7 @@ pub fn read<T: HidTransport>(
         .zip(keycodes.chunks(layer_size))
         .map(|(index, layer_keycodes)| Layer {
             index,
-            keys: keys(layout, layer_keycodes),
+            keys: keys(model, layer_keycodes),
         })
         .collect();
     Ok(Keymap {
@@ -136,7 +140,8 @@ pub fn read<T: HidTransport>(
     })
 }
 
-fn keys(layout: &RegisteredLayout, keycodes: &[Keycode]) -> Vec<Key> {
+fn keys(model: &RegisteredModel, keycodes: &[Keycode]) -> Vec<Key> {
+    let layout = model.layout();
     let positions =
         (0..layout.rows()).flat_map(|row| (0..layout.columns()).map(move |column| (row, column)));
     positions
@@ -158,7 +163,7 @@ fn keys(layout: &RegisteredLayout, keycodes: &[Keycode]) -> Vec<Key> {
                     .and_then(|placement| placement.secondary_bounds)
                     .map(Bounds::from),
                 keycode: u16::from(*keycode),
-                name: keycode.name(),
+                name: model.keycode_name(*keycode),
             }
         })
         .collect()
@@ -166,7 +171,7 @@ fn keys(layout: &RegisteredLayout, keycodes: &[Keycode]) -> Vec<Key> {
 
 #[cfg(test)]
 mod tests {
-    use openkeychron_via::{RegisteredLayout, ViaDefinition};
+    use openkeychron_via::{DeviceRegistry, ViaDefinition};
 
     use super::{Bounds, Key, Keymap, keys, read};
     use crate::test_support::{lend, load_fixture, replay};
@@ -248,21 +253,38 @@ mod tests {
     }
 
     #[test]
-    fn gives_a_custom_or_unknown_keycode_no_name() {
+    fn gives_an_unknown_keycode_no_name() {
         let keymap = read_synthetic_keymap();
-        let unnamed = [(0, 1), (0, 113), (1, 67), (1, 113)].map(|(layer, slot)| {
+        let unnamed = [(0, 1), (0, 113), (1, 113)].map(|(layer, slot)| {
             let key: &Key = &keymap.layers[layer].keys[slot];
             (key.keycode, key.name.clone())
         });
-        assert_eq!(
-            unnamed,
-            [
-                (0xdead, None),
-                (0xbeef, None),
-                (0x7e00, None),
-                (0xffff, None)
-            ]
-        );
+        assert_eq!(unnamed, [(0xdead, None), (0xbeef, None), (0xffff, None)]);
+    }
+
+    #[test]
+    fn names_a_keychron_custom_keycode_as_the_connected_model_does() {
+        let keymap = read_synthetic_keymap();
+        let key: &Key = &keymap.layers[1].keys[67];
+        assert_eq!((key.keycode, key.name.as_deref()), (0x7e00, Some("LOPTN")));
+    }
+
+    #[test]
+    fn leaves_a_keychron_custom_keycode_raw_for_a_model_from_a_definition_file() {
+        let text = std::fs::read_to_string(crate::test_support::synthetic_path(
+            "via-definition-second-model.json",
+        ))
+        .unwrap();
+        let mut registry = DeviceRegistry::built_in();
+        registry
+            .register(ViaDefinition::from_json(&text).unwrap())
+            .unwrap();
+        let model = registry
+            .model(0x3434, 0x0950)
+            .expect("the definition registers under its own IDs");
+        let layer_size = usize::from(model.layout().rows()) * usize::from(model.layout().columns());
+        let placed = keys(model, &vec![0x7e00u16.into(); layer_size]);
+        assert!(placed.iter().all(|key| key.name.is_none()));
     }
 
     #[test]
@@ -311,9 +333,11 @@ mod tests {
         .unwrap();
         let definition = ViaDefinition::from_json(&text).unwrap();
         let first = definition.keys[0];
-        let layout = RegisteredLayout::Definition(definition);
-        let layer_size = usize::from(layout.rows()) * usize::from(layout.columns());
-        let placed = keys(&layout, &vec![0u16.into(); layer_size]);
+        let mut registry = DeviceRegistry::built_in();
+        registry.register(definition).unwrap();
+        let model = registry.model(0x3434, 0x0950).unwrap();
+        let layer_size = usize::from(model.layout().rows()) * usize::from(model.layout().columns());
+        let placed = keys(model, &vec![0u16.into(); layer_size]);
         let key = placed
             .iter()
             .find(|key| [key.row, key.column] == first.matrix)
