@@ -8,16 +8,20 @@ use serde::Serialize;
 use crate::error::CommandError;
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceInfo {
     pub via_protocol_version: u16,
     pub via_firmware_version: u32,
     pub layout_options: u32,
+    // Milliseconds of uptime stay far below 2^53, so a JavaScript number holds them exactly.
+    #[cfg_attr(test, ts(type = "number"))]
     pub uptime_ms: u64,
     pub keychron_firmware: KeychronFirmware,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",

@@ -7,6 +7,7 @@ use serde::Serialize;
 use crate::error::CommandError;
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct MacroList {
     pub macro_count: u8,
@@ -17,6 +18,7 @@ pub struct MacroList {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct MacroSlot {
     pub slot: u8,
@@ -25,6 +27,7 @@ pub struct MacroSlot {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum MacroContent {
     Actions {
@@ -38,6 +41,7 @@ pub enum MacroContent {
 
 /// Keycodes are 8-bit basic keycodes. `Text` is typed by the firmware as US-ANSI keycodes.
 #[derive(Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(tag = "kind", content = "value", rename_all = "camelCase")]
 pub enum Action {
     Text(String),

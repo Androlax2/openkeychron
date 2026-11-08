@@ -7,6 +7,7 @@ use serde::Serialize;
 use crate::error::CommandError;
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     pub debounce: Debounce,
@@ -16,6 +17,7 @@ pub struct Settings {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Debounce {
     pub algorithm: DebounceAlgorithm,
@@ -23,6 +25,7 @@ pub struct Debounce {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum DebounceAlgorithm {
     SymmetricDeferGlobal,
@@ -35,6 +38,7 @@ pub enum DebounceAlgorithm {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SnapClickPair {
     pub mode: SnapClickMode,
@@ -44,6 +48,7 @@ pub struct SnapClickPair {
 
 /// Keychron's "LKP" is most likely `last-input`: an inference, see docs/protocol/keychron.md.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum SnapClickMode {
     Off,
@@ -55,6 +60,7 @@ pub enum SnapClickMode {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct WirelessTimers {
     pub backlight_off_seconds: u16,

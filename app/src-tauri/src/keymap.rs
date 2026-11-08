@@ -8,6 +8,7 @@ use serde::Serialize;
 use crate::error::CommandError;
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Keymap {
     pub layer_count: u8,
@@ -17,6 +18,7 @@ pub struct Keymap {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Layer {
     pub index: u8,
@@ -25,6 +27,7 @@ pub struct Layer {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Key {
     pub row: u8,

@@ -1,6 +1,8 @@
 // Without this, a Windows release build also opens a console window.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(test)]
+mod bindings;
 mod commands;
 mod device;
 mod error;

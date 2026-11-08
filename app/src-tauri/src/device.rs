@@ -6,6 +6,7 @@ use serde::Serialize;
 use crate::error::CommandError;
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Device {
     /// The USB product string, when the device reports one.
