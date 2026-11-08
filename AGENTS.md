@@ -52,7 +52,8 @@ The sandbox cannot open `/dev/hidraw*`, and CI has no keyboard. So:
 
 ## Build and verify
 
-Toolchain: Rust stable (1.99+), plus `typos` and `cargo-deny` for the full gate.
+Toolchain: Rust stable (1.99+), plus `typos` and `cargo-deny` for the full gate, and Node.js,
+`pnpm` and WebKitGTK for the app (`docs/DEVELOPMENT.md`).
 
 ### While iterating
 
