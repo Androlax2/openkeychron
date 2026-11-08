@@ -1,10 +1,9 @@
 //! A stateful fake Keychron keyboard behind [`openkeychron_hid::HidTransport`].
 //!
 //! A [`MockKeyboard`] holds a keymap, encoder keys, macros, the Keychron settings and the
-//! lighting. Every
-//! [`MockTransport`] it hands out answers VIA and Keychron requests from that one state and
-//! applies writes to it, so a write is visible to the next read, even through another
-//! transport. The app's mock mode uses it to serve a whole UI session on one device; tests use
+//! lighting. Every [`MockTransport`] it hands out answers VIA and Keychron requests from that
+//! one state and applies writes to it, so a write is visible to the next read, even through
+//! another transport. The app's mock mode uses it to serve a whole UI session on one device; tests use
 //! it to drive a write and its undo end to end.
 //!
 //! It answers only the requests listed in `docs/protocol/` that openkeychron sends for the

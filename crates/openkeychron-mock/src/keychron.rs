@@ -1,6 +1,6 @@
 //! The Keychron requests the mock keyboard answers: `0xA0`, `0xA1`, `0xA2`, the misc group's
-//! debounce, Snap Click and wireless timers, and the RGB group (`crate::lighting`). IDs and layouts from `docs/protocol/keychron.md`,
-//! which cites `keyboards/keychron/common/keychron_raw_hid.h` and its handlers in
+//! debounce, Snap Click and wireless timers, and the RGB group (`crate::lighting`). IDs and
+//! layouts from `docs/protocol/keychron.md`, which cites `keyboards/keychron/common/keychron_raw_hid.h` and its handlers in
 //! <https://github.com/Keychron/qmk_firmware/tree/2b493ff95f2665db719b1e95c91babb5036e72f3/keyboards/keychron/common>.
 
 use std::ops::Range;

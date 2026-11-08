@@ -142,7 +142,8 @@ OPENKEYCHRON_FIXTURE=/tmp/openkeychron-mock pnpm --dir app tauri dev
   layers of zero keycodes, sixteen empty macros, debounce 50 ms, effect 1 with every other
   lighting value at zero, every LED in mixed region 0, empty effect lists) each time the app
   starts, and never touches the file. Effect numbers are synthetic: it takes effects 1 to 24,
-  with 24 as mixed RGB. A request it does not implement (for example the indicator or per-key
+  with 24 as mixed RGB. Its `0xA2` feature bits name only what it answers (dynamic debounce,
+  Snap Click, Keychron RGB), not every bit a real V5 Max sets. A request it does not implement (for example the indicator or per-key
   type commands) fails with "the mock keyboard does not answer request …", and a value the
   firmware would silently change (an effect past 24, brightness while lighting is off) fails
   with "the mock keyboard refuses …".

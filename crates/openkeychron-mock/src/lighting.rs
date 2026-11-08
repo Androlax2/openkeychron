@@ -249,8 +249,9 @@ pub(crate) fn keychron_rgb(
             }
             None => FAILURE,
         },
-        GET_EFFECT_LIST => match effect_slots(reply).map_err(refuse)? {
+        GET_EFFECT_LIST => match effect_slots(reply) {
             Some((region, slots)) => {
+                let region = region_index(region).map_err(refuse)?;
                 let (entries, _) = reply[3..].as_chunks_mut::<EFFECT_LEN>();
                 for (entry, slot) in entries
                     .iter_mut()
@@ -262,15 +263,17 @@ pub(crate) fn keychron_rgb(
             }
             None => FAILURE,
         },
-        SET_EFFECT_LIST => match effect_slots(reply).map_err(refuse)? {
+        SET_EFFECT_LIST => match effect_slots(reply) {
             Some((region, slots)) => {
                 let entries = &reply[5..].as_chunks::<EFFECT_LEN>().0[..slots.len()];
+                // The firmware checks the effects before it writes the region's slots.
                 if entries
                     .iter()
                     .any(|[effect, ..]| *effect >= MIXED_RGB_EFFECT)
                 {
                     FAILURE
                 } else {
+                    let region = region_index(region).map_err(refuse)?;
                     lighting.effect_lists[region][slots].copy_from_slice(entries);
                     SUCCESS
                 }
@@ -328,22 +331,25 @@ fn led_range_within(start: u8, count: u8, limit: u8) -> Option<Range<usize>> {
 }
 
 /// The region and slots an effect list request names: region `[2]`, start `[3]`, count `[4]`.
-/// `None` where the firmware fails it; an error for the region its off-by-one check lets
-/// through (`region > EFFECT_LAYERS`).
-fn effect_slots(request: &[u8; REPORT_LEN]) -> Result<Option<(usize, Range<usize>)>, String> {
+/// `None` where the firmware fails it. Its region check is off by one (`region > EFFECT_LAYERS`),
+/// so the region may be one past the last: see [`region_index`].
+fn effect_slots(request: &[u8; REPORT_LEN]) -> Option<(u8, Range<usize>)> {
     let [region, start, count] = [request[2], request[3], request[4]];
     let slots = usize::from(start)..usize::from(start) + usize::from(count);
-    if count > EFFECTS_PER_REQUEST
+    let fails = count > EFFECTS_PER_REQUEST
         || region > REGION_COUNT
-        || slots.end > usize::from(EFFECTS_PER_REGION)
-    {
-        return Ok(None);
-    }
-    if region == REGION_COUNT {
+        || slots.end > usize::from(EFFECTS_PER_REGION);
+    (!fails).then_some((region, slots))
+}
+
+/// The index of `region` in the effect lists, refusing the one past the last that the firmware
+/// lets through and indexes past its array with.
+fn region_index(region: u8) -> Result<usize, String> {
+    if region >= REGION_COUNT {
         return Err(format!(
             "region {region} is outside its {REGION_COUNT} regions, which the firmware indexes \
              past its array"
         ));
     }
-    Ok(Some((usize::from(region), slots)))
+    Ok(usize::from(region))
 }

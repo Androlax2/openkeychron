@@ -126,14 +126,19 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_brightness_set_while_lighting_is_off_which_the_firmware_ignores() {
+    fn refuses_brightness_speed_and_colour_sets_while_lighting_is_off_which_the_firmware_ignores() {
         let keyboard = v5_max_iso();
         via(&keyboard).set_rgb_value(RgbValue::Effect(0)).unwrap();
-        assert_eq!(
-            refusal(&keyboard, &[0x07, 0x03, 0x01, 128]),
-            "device I/O failed: the mock keyboard refuses VIA command 0x07: the firmware ignores \
-             brightness, speed and colour while lighting is off, which the mock does not model"
-        );
+        let ignored = "device I/O failed: the mock keyboard refuses VIA command 0x07: the firmware \
+                       ignores brightness, speed and colour while lighting is off, which the mock \
+                       does not model";
+        for set in [
+            [0x07, 0x03, 0x01, 128, 0],
+            [0x07, 0x03, 0x03, 200, 0],
+            [0x07, 0x03, 0x04, 85, 200],
+        ] {
+            assert_eq!(refusal(&keyboard, &set), ignored, "request {set:02x?}");
+        }
     }
 
     #[test]
@@ -212,6 +217,24 @@ mod tests {
             .map(|(row, column)| rgb.led_index(V5_MAX_ISO_MATRIX, row, column).unwrap())
             .collect();
         assert_eq!(leds, [Some(0), None, Some(16), Some(89), Some(97)]);
+    }
+
+    #[test]
+    fn an_led_lookup_answers_no_led_for_every_column_outside_its_mask() {
+        let mut transport = v5_max_iso().connect();
+        transport
+            .write(&request(&[0xa8, 0x06, 1, 0b0000_0100]))
+            .unwrap();
+        let reply = transport.read(Duration::from_millis(1)).unwrap();
+        let mut wanted = [0xff; 19];
+        wanted[2] = 18;
+        assert_eq!(reply[3..22], wanted);
+    }
+
+    #[test]
+    fn fails_an_effect_list_set_with_mixed_rgb_for_the_region_past_the_last_with_the_failure_status()
+     {
+        assert_eq!(status(&v5_max_iso(), &[0xa8, 0x0f, 2, 0, 1, 24]), 1);
     }
 
     #[test]
