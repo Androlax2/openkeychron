@@ -1,5 +1,5 @@
-//! What `read_keymap` returns: every layer's raw keycodes on the matrix grid, with each
-//! physical key's place on the keyboard and its built-in legends.
+//! What `read_keymap` returns: every layer's raw keycodes and their QMK names on the matrix
+//! grid, with each physical key's place on the keyboard and its built-in legends.
 //! Only reads.
 
 use openkeychron_hid::{HidTransport, KeychronDevice};
@@ -47,6 +47,9 @@ pub struct Key {
     /// A second rectangle that, with `bounds`, makes a shape such as ISO Enter.
     pub secondary_bounds: Option<Bounds>,
     pub keycode: u16,
+    /// QMK's name for `keycode`, such as `LCTL(C)`. Absent for a custom or unknown keycode:
+    /// show `keycode` then.
+    pub name: Option<String>,
 }
 
 /// A rectangle in key units: 1.0 is one standard key.
@@ -155,6 +158,7 @@ fn keys(layout: &RegisteredLayout, keycodes: &[Keycode]) -> Vec<Key> {
                     .and_then(|placement| placement.secondary_bounds)
                     .map(Bounds::from),
                 keycode: u16::from(*keycode),
+                name: keycode.name(),
             }
         })
         .collect()
@@ -200,6 +204,7 @@ mod tests {
                 }),
                 secondary_bounds: None,
                 keycode: 0x0014,
+                name: Some("Q".to_owned()),
             }
         );
         assert_eq!(keymap.layers[0].keys[1].legend, None);
@@ -221,6 +226,42 @@ mod tests {
         assert_eq!(
             (unused.is_physical, unused.bounds, unused.secondary_bounds),
             (false, None, None)
+        );
+    }
+
+    #[test]
+    fn names_each_keycode_as_qmk_does_next_to_its_raw_value() {
+        let keymap = read_synthetic_keymap();
+        let named = [(0, 0), (0, 39), (0, 58), (1, 0)].map(|(layer, slot)| {
+            let key: &Key = &keymap.layers[layer].keys[slot];
+            (key.keycode, key.name.clone())
+        });
+        assert_eq!(
+            named,
+            [
+                (0x0029, Some("ESC".to_owned())),
+                (0x0014, Some("Q".to_owned())),
+                (0x0004, Some("A".to_owned())),
+                (0x0001, Some("TRNS".to_owned())),
+            ]
+        );
+    }
+
+    #[test]
+    fn gives_a_custom_or_unknown_keycode_no_name() {
+        let keymap = read_synthetic_keymap();
+        let unnamed = [(0, 1), (0, 113), (1, 67), (1, 113)].map(|(layer, slot)| {
+            let key: &Key = &keymap.layers[layer].keys[slot];
+            (key.keycode, key.name.clone())
+        });
+        assert_eq!(
+            unnamed,
+            [
+                (0xdead, None),
+                (0xbeef, None),
+                (0x7e00, None),
+                (0xffff, None)
+            ]
         );
     }
 

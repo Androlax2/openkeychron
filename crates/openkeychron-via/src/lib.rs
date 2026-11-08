@@ -9,6 +9,7 @@ mod client;
 mod command;
 mod definition;
 mod keycode;
+mod keycode_name;
 mod keymap;
 mod keymap_write;
 mod layout;
