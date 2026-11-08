@@ -9,7 +9,7 @@ use ts_rs::{Config, TS};
 
 use crate::device::Device;
 use crate::info::{DeviceInfo, KeychronFirmware};
-use crate::keymap::{Key, Keymap, Layer};
+use crate::keymap::{Bounds, Key, Keymap, Layer};
 use crate::macros::{Action, MacroContent, MacroList, MacroSlot};
 use crate::settings::{
     Debounce, DebounceAlgorithm, Settings, SnapClickMode, SnapClickPair, WirelessTimers,
@@ -27,6 +27,7 @@ fn bindings() -> String {
         Keymap::decl(&config),
         Layer::decl(&config),
         Key::decl(&config),
+        Bounds::decl(&config),
         MacroList::decl(&config),
         MacroSlot::decl(&config),
         MacroContent::decl(&config),

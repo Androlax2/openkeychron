@@ -20,6 +20,7 @@ clippy:
 
 test:
 	cargo test --workspace --locked
+	pnpm --dir app run test
 
 doc:
 	cargo doc --workspace --no-deps --document-private-items --locked

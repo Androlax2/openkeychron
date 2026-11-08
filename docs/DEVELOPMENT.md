@@ -11,7 +11,7 @@ this file is the handbook it points to.
 | `make` | any | `make ci`, the local copy of CI |
 | `typos` | 1.51.1 | `make typos` |
 | `cargo-deny` | 0.20.2 | `make deny` |
-| Node.js | 26.13.0 | the app's checks in `make fmt` and `make clippy`, `tauri dev` |
+| Node.js | 26.13.0 | the app's checks in `make fmt`, `make clippy` and `make test`, `tauri dev` |
 | `pnpm` | 12.17.0 (`packageManager` in `app/package.json`) | the app's dependencies |
 
 CI installs `typos`, `cargo-deny`, Node.js and `pnpm` at these exact versions, so match them
@@ -59,10 +59,11 @@ clone, and again after `app/pnpm-lock.yaml` changes:
 ```sh
 pnpm --dir app install --frozen-lockfile
 pnpm --dir app check       # Biome format and lint, then svelte-check; any warning fails
+pnpm --dir app test        # component tests (Vitest in jsdom)
 pnpm --dir app tauri dev   # opens the window, reloading on changes
 ```
 
-`make fmt` and `make clippy` run the same app checks, so they need that install too.
+`make fmt`, `make clippy` and `make test` run the same app checks, so they need that install too.
 
 ## The full gate
 
@@ -72,9 +73,9 @@ make ci
 
 It runs `fmt`, `clippy`, `test`, `doc`, `typos` and `deny`, with every warning treated as an
 error. `fmt` also checks the app's formatting with Biome; `clippy` also runs Biome's linter and
-`svelte-check`. Each is also its own target (`make clippy`, `make test`…) and its own CI job of
-the same name. Those six jobs are the required checks on `main`, so a green `make ci` before
-pushing means a green PR.
+`svelte-check`; `test` also runs the app's component tests. Each is also its own target
+(`make clippy`, `make test`…) and its own CI job of the same name. Those six jobs are the
+required checks on `main`, so a green `make ci` before pushing means a green PR.
 
 Builds use `--locked`. After changing a `Cargo.toml`, run `cargo update -w` and commit the
 updated `Cargo.lock` with it.
