@@ -206,7 +206,12 @@ mod tests {
         );
         assert!(output.status.success(), "{}", stderr(&output));
         let text = stdout(&output);
-        for expected in ["Layer 0", "(0,0)=0x0029", "(1,1)=0x0028", "(1,3)=0x0000"] {
+        for expected in [
+            "Layer 0",
+            "(0,0)=ESC 0x0029",
+            "(1,1)=ENT 0x0028",
+            "(1,3)=NO 0x0000",
+        ] {
             assert!(text.contains(expected), "missing {expected}: {text}");
         }
         assert!(!text.contains("(1,2)"), "{text}");

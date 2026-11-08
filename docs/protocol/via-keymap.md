@@ -60,11 +60,14 @@ cargo run -p openkeychron-cli -- keymap show --fixture fixtures/synthetic/cli-ke
 cargo run -p openkeychron-cli -- keymap show --layer 1 --json --fixture fixtures/synthetic/cli-keymap.toml
 ```
 
-Text is a six-row **matrix grid**, not a scaled keyboard drawing. `A=0x0014` means the
-physical French A position currently has raw keycode `0x0014`; it does not promise
-that the host will type A. Zero and transparent codes remain visible on physical keys.
-Unused zero cells are blank; unused nonzero cells display their `(row,column)` and raw
-value instead of hiding unexpected data. Wide grids may need a wide terminal.
+Text is a six-row **matrix grid**, not a scaled keyboard drawing. `A=Q 0x0014` means the
+physical French A position currently has the keycode QMK calls `Q`, raw value `0x0014`; it
+does not promise that the host will type Q. The name comes from `Keycode::name()`. A keycode
+without a name (unknown, or a Keychron custom value such as `0x7e00`) prints its raw value alone, as in
+`(0,1)=0xdead`, never a guess. Zero and transparent codes remain visible on physical keys
+(`R=NO 0x0000`, `Esc=TRNS 0x0001`). Unused zero cells are blank; unused nonzero cells display
+their `(row,column)` and value instead of hiding unexpected data. Wide grids may need a wide
+terminal.
 
 `--layer` is zero-based and filters output only: the reader still consumes the complete
 reported keymap, so the same fixture works with or without layer selection. An unavailable
@@ -97,7 +100,7 @@ checks classification and exhaustive raw-value preservation. `fixtures/synthetic
 is hand-written, not hardware evidence. No new real-device keymap capture has been made;
 the existing real cable capture verifies metadata only. Receiver configuration stays
 unsupported. The CLI display above uses these existing read-only APIs without adding
-keymap writes or a decoded key-name catalogue.
+keymap writes.
 
 Backed-up editing is documented separately in [keymap write safety](via-keymap-write.md).
 The `show` command stays read-only.

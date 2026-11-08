@@ -50,11 +50,11 @@ mod tests {
         for expected in [
             "Layer 0",
             "Layer 1",
-            "A=0x0014",
-            "Q=0x0004",
-            "M=0x0033",
-            "W=0x001d",
-            "R=0x0000",
+            "A=Q 0x0014",
+            "Q=A 0x0004",
+            "M=SCLN 0x0033",
+            "W=Z 0x001d",
+            "R=NO 0x0000",
             "(0,1)=0xdead",
             "(5,18)=0xbeef",
             "M=0x7e00",
@@ -120,7 +120,7 @@ mod tests {
         let text = stdout(&output);
         assert!(text.contains("Layer 1"), "{text}");
         assert!(!text.contains("Layer 0"), "{text}");
-        assert!(text.contains("Esc=0x0001"), "{text}");
+        assert!(text.contains("Esc=TRNS 0x0001"), "{text}");
         assert!(text.contains("M=0x7e00"), "{text}");
     }
 
