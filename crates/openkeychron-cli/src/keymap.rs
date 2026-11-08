@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
-use openkeychron_via::{DeviceRegistry, Via, ViaDefinition};
+use openkeychron_via::{DeviceRegistry, Keycode, Via, ViaDefinition};
 use serde::Serialize;
 
 use crate::session::{Session, SessionError};
@@ -11,8 +11,8 @@ use crate::{DeviceOutput, device_output};
 
 #[derive(Debug, Subcommand)]
 pub enum KeymapAction {
-    /// Print each layer as a matrix grid with raw keycodes: French legends on the built-in
-    /// V5 Max ISO, positions for a layout read with --layout. Only reads.
+    /// Print each layer as a matrix grid with QMK names and raw keycodes: French legends on the
+    /// built-in V5 Max ISO, positions for a layout read with --layout. Only reads.
     Show {
         /// Show only this zero-based layer (all layers are still read).
         #[arg(long)]
@@ -216,9 +216,13 @@ fn print_grid(output: &KeymapOutput) {
         .flat_map(|layer| &layer.keys)
         .any(|key| key.legend.is_some());
     if has_legends {
-        println!("Physical FR legends = raw hexadecimal keycodes; grid uses matrix rows/columns.");
+        println!(
+            "Physical FR legends = QMK name and raw hexadecimal keycode; grid uses matrix rows/columns."
+        );
     } else {
-        println!("(row,column) = raw hexadecimal keycodes; the layout file has no legends.");
+        println!(
+            "(row,column) = QMK name and raw hexadecimal keycode; the layout file has no legends."
+        );
     }
     for (index, cells) in layers {
         println!("Layer {index}");
@@ -233,11 +237,20 @@ fn print_grid(output: &KeymapOutput) {
 }
 
 fn cell_text(key: &KeyOutput) -> String {
+    let assignment = assignment_text(key.keycode);
     match &key.legend {
-        Some(legend) => format!("{legend}=0x{:04x}", key.keycode),
+        Some(legend) => format!("{legend}={assignment}"),
         None if key.is_physical || key.keycode != 0 => {
-            format!("({},{})=0x{:04x}", key.row, key.column, key.keycode)
+            format!("({},{})={assignment}", key.row, key.column)
         }
         None => String::new(),
+    }
+}
+
+/// QMK's name before the raw value; the raw value alone when QMK gives the keycode no name.
+fn assignment_text(raw_keycode: u16) -> String {
+    match Keycode::from(raw_keycode).name() {
+        Some(name) => format!("{name} 0x{raw_keycode:04x}"),
+        None => format!("0x{raw_keycode:04x}"),
     }
 }
