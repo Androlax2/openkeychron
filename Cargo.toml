@@ -5,6 +5,7 @@ members = [
     "crates/openkeychron-via",
     "crates/openkeychron-keychron",
     "crates/openkeychron-cli",
+    "app/src-tauri",
 ]
 
 [workspace.package]
