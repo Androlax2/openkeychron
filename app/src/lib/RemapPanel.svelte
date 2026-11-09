@@ -398,7 +398,7 @@ function restoreBackup(): void {
   <p id="{id}-history">
     Undo takes back the app's changes one at a time, and Redo puts back what Undo took back until
     the next change. Restore backup puts back the keymap from before the app's first change on this
-    keyboard. All are kept until the app quits.
+    keyboard. All are kept until the app quits or the keyboard is unplugged.
   </p>
 
   <p role="status" aria-busy={pending !== null}>

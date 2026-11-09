@@ -105,3 +105,16 @@ describe("RemapPanel, as the selection changes", () => {
     ]);
   });
 });
+
+describe("RemapPanel history help", () => {
+  it("says the history ends when the keyboard is unplugged, not only when the app quits", () => {
+    const view = render({
+      path: PATH,
+      editable: EDITABLE_KNOB,
+      selection: Z_KEY,
+      onchange: () => {},
+    });
+    const help = view.querySelector("[id$='-history']")?.textContent?.replace(/\s+/g, " ") ?? "";
+    expect(help).toMatch(/until the app quits or the keyboard is unplugged/);
+  });
+});
