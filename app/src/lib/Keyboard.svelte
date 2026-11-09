@@ -76,8 +76,14 @@ function capRectangles(key: PlacedKey): Bounds[] {
   }));
 }
 
-/** The keycap shows the name, or the raw value of a custom or unknown keycode. */
+/**
+ * The keycap shows what a French AZERTY host types for the keycode, else QMK's name, else the
+ * raw value of a custom or unknown keycode. QMK's name stays in the selection line.
+ */
 function keycodeLabel(key: Key): string {
+  if (key.azertyText !== null) {
+    return key.azertyText;
+  }
   return key.name === null ? hex(key.keycode) : shortenKeycodeName(key.name);
 }
 
@@ -104,6 +110,7 @@ function accessibleName(key: Key): string {
     baseLegend(key),
     key.shiftLegend === null ? null : `Shift ${key.shiftLegend}`,
     key.altGrLegend === null ? null : `AltGr ${key.altGrLegend}`,
+    key.azertyText === null ? null : `types ${key.azertyText}`,
     `keycode ${describeKeycode(key)}`,
   ]
     .filter((part) => part !== null)

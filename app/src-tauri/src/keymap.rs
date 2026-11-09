@@ -4,7 +4,7 @@
 
 use openkeychron_hid::{HidTransport, KeychronDevice};
 use openkeychron_via::{
-    DeviceRegistry, EncoderDirection, Keycode, Legends, Rectangle, RegisteredLayout,
+    DeviceRegistry, EncoderDirection, FRENCH_AZERTY, Keycode, Legends, Rectangle, RegisteredLayout,
     RegisteredModel, Via, ViaError,
 };
 use serde::Serialize;
@@ -76,6 +76,9 @@ pub struct Key {
     /// Keychron custom keycode, such as `LOPTN`. Absent for any other custom or unknown
     /// keycode: show `keycode` then.
     pub name: Option<String>,
+    /// The character `keycode` types alone on a French AZERTY host, such as `a` for `KC_Q`.
+    /// Absent when that layout does not cover the keycode: show `name` then.
+    pub azerty_text: Option<char>,
     /// The index of the encoder whose press this key is, such as the V5 Max's knob.
     pub encoder: Option<u8>,
 }
@@ -240,6 +243,7 @@ fn keys(model: &RegisteredModel, keycodes: &[Keycode]) -> Vec<Key> {
                     .map(Bounds::from),
                 keycode: u16::from(*keycode),
                 name: model.keycode_name(*keycode),
+                azerty_text: FRENCH_AZERTY.typed_by(*keycode),
                 encoder: placement.as_ref().and_then(|placement| placement.encoder),
             }
         })
@@ -287,6 +291,7 @@ mod tests {
                 secondary_bounds: None,
                 keycode: 0x0014,
                 name: Some("Q".to_owned()),
+                azerty_text: Some('a'),
                 encoder: None,
             }
         );

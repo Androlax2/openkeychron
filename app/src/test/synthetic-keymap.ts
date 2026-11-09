@@ -8,6 +8,15 @@ const COLUMNS = 5;
 
 type Assignment = [keycode: number, name: string | null];
 
+// What a French AZERTY host types for the basic keycodes used below, as openkeychron-via gives it.
+const AZERTY_TEXT = new Map<number, string>([
+  [0x001e, "&"],
+  [0x001f, "é"],
+  [0x0020, '"'],
+  [0x0014, "a"],
+  [0x001a, "z"],
+]);
+
 function physicalKey(
   row: number,
   column: number,
@@ -27,6 +36,7 @@ function physicalKey(
     secondaryBounds,
     keycode,
     name,
+    azertyText: AZERTY_TEXT.get(keycode) ?? null,
     encoder: null,
   });
 }
@@ -44,6 +54,7 @@ const unusedSlot =
     secondaryBounds: null,
     keycode,
     name,
+    azertyText: null,
     encoder: null,
   });
 
@@ -169,7 +180,7 @@ export function withKeycode(
             ...layer,
             keys: layer.keys.map((key) =>
               key.row === position.row && key.column === position.column
-                ? { ...key, keycode, name }
+                ? { ...key, keycode, name, azertyText: AZERTY_TEXT.get(keycode) ?? null }
                 : key,
             ),
           },
