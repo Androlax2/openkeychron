@@ -74,9 +74,39 @@ To list rules that mention Keychron:
 grep -rl -i '3434' /etc/udev/rules.d /usr/lib/udev/rules.d
 ```
 
+## The app packages
+
+`pnpm --dir app tauri build` makes two packages in `target/release/bundle/` (how to build:
+[`DEVELOPMENT.md`](DEVELOPMENT.md#the-linux-packages)):
+
+| Package | The udev rule |
+|---|---|
+| `deb/openkeychron_<version>_amd64.deb` (Debian, Ubuntu) | Installed with the app, at `/usr/lib/udev/rules.d/70-openkeychron.rules`, and removed with it |
+| `appimage/openkeychron_<version>_amd64.AppImage` (any distribution) | Not installed: an AppImage cannot install system files. Install it by hand, [below](#install) |
+
+With the deb:
+
+```sh
+sudo apt install ./openkeychron_<version>_amd64.deb
+sudo udevadm trigger --subsystem-match=hidraw --action=change
+```
+
+udev reads the new rule by itself; the trigger (or unplugging and replugging the receiver)
+applies it to a device that is already plugged in. `sudo apt remove openkeychron` removes the
+app and the rule. A copy of the rule in `/etc/udev/rules.d/` with the same name overrides the
+packaged one: remove it if you installed the rule by hand before.
+
+With the AppImage, install the rule [below](#install), then:
+
+```sh
+chmod +x openkeychron_<version>_amd64.AppImage
+./openkeychron_<version>_amd64.AppImage
+```
+
 ## Install
 
-Read the rule first. Then:
+This installs the rule by hand, for the AppImage or a build from source. Read the rule first.
+Then:
 
 ```sh
 sudo install -m 0644 packaging/linux/70-openkeychron.rules /etc/udev/rules.d/

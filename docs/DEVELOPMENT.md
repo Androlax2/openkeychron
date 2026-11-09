@@ -65,6 +65,21 @@ pnpm --dir app tauri dev   # opens the window, reloading on changes
 
 `make fmt`, `make clippy` and `make test` run the same app checks, so they need that install too.
 
+### The Linux packages
+
+```sh
+pnpm --dir app tauri build
+```
+
+Tauri's bundler builds the app in release mode and writes a deb and an AppImage to
+`target/release/bundle/deb/` and `target/release/bundle/appimage/`. The deb carries the udev
+rule from `packaging/linux/`; the AppImage cannot. What each package does with the rule, and
+how to install it: [`INSTALL-linux.md`](INSTALL-linux.md#the-app-packages).
+
+The deb needs no Debian tools to build. The AppImage needs `linuxdeploy`, which Tauri downloads
+into `~/.cache/tauri/` on the first build. An AppImage links the system libraries of the machine
+that built it, so one built on Arch may not start on an older distribution.
+
 ## The full gate
 
 ```sh

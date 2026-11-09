@@ -22,6 +22,19 @@
     }
   },
   "bundle": {
-    "active": false
+    "active": true,
+    "targets": ["deb", "appimage"],
+    "icon": ["icons/icon.png"],
+    "category": "Utility",
+    "publisher": "Androlax2",
+    "shortDescription": "Remap a Keychron keyboard without Chrome or an account",
+    "longDescription": "A native, local-first alternative to Keychron Launcher: remap keys, edit macros, and change lighting and Keychron settings without Chrome, an account or telemetry.",
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/lib/udev/rules.d/70-openkeychron.rules": "../../packaging/linux/70-openkeychron.rules"
+        }
+      }
+    }
   }
 }
