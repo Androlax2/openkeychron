@@ -4,8 +4,8 @@
 //! `layouts.keymap` is in keyboard-layout-editor (KLE) form. It is read with the rules of
 //! VIA's own reader, [`kle-parser.ts`](https://github.com/the-via/reader/blob/c26009992a7a2e9776720ebf5644a50f8e92c7a5/src/kle-parser.ts):
 //! the first label is `row,column`, the tenth is an encoder `e<index>`, and the fourth is a
-//! layout option. Features this crate cannot represent yet (rotation, decals, label
-//! alignment, layout options) are rejected, never approximated.
+//! layout option. Features this crate cannot represent yet (decals, label alignment, layout
+//! options) are rejected, never approximated.
 //! See `docs/protocol/via-definitions.md`.
 
 use std::collections::BTreeSet;
@@ -40,6 +40,19 @@ pub struct DefinitionKey {
     pub secondary_bounds: Option<Rectangle>,
     /// Encoder index associated with this key's press.
     pub encoder: Option<u8>,
+    /// How the key (and its secondary rectangle) is turned after being placed by `bounds`.
+    /// `None` for a key that is not rotated.
+    pub rotation: Option<KeyRotation>,
+}
+
+/// A rotation of a key's rectangles about a point, in the same absolute layout coordinates
+/// as [`DefinitionKey::bounds`]. `bounds` is the key before it is turned.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KeyRotation {
+    /// Clockwise on screen (y grows downward), in degrees.
+    pub angle_degrees: f32,
+    pub origin_x: f32,
+    pub origin_y: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -61,7 +74,7 @@ pub enum DefinitionError {
 
     #[error(
         "layouts.keymap[{keymap_row}][{item}] uses {property:?}, which openkeychron cannot \
-         represent yet (rotation, label alignment and decals are not supported)"
+         represent yet (label alignment and decals are not supported)"
     )]
     UnsupportedProperty {
         keymap_row: usize,
@@ -141,7 +154,7 @@ const ENCODER_LABEL: usize = 9;
 
 /// Properties VIA's reader honours that this crate cannot represent. VIA ignores every
 /// other property except the geometry ones, so they are ignored here too.
-const UNSUPPORTED_PROPERTIES: &[&str] = &["r", "rx", "ry", "a", "d"];
+const UNSUPPORTED_PROPERTIES: &[&str] = &["a", "d"];
 
 impl ViaDefinition {
     /// Reads a VIA definition. Only the identity, matrix size and `layouts` are used; other
@@ -194,10 +207,14 @@ fn parse_id(field: &'static str, value: &str) -> Result<u16, DefinitionError> {
         })
 }
 
-/// What the next key inherits from the property objects before it.
+/// What the next key inherits from the property objects before it. Rotation carries from
+/// row to row, as in VIA's reader, until another object changes it.
 struct Cursor {
     x: f32,
     y: f32,
+    angle_degrees: f32,
+    origin_x: f32,
+    origin_y: f32,
     width: f32,
     height: f32,
     x2: Option<f32>,
@@ -221,6 +238,9 @@ fn read_keymap(keymap: &[Vec<Value>]) -> Result<Vec<DefinitionKey>, DefinitionEr
     let mut cursor = Cursor {
         x: 0.0,
         y: 0.0,
+        angle_degrees: 0.0,
+        origin_x: 0.0,
+        origin_y: 0.0,
         width: 1.0,
         height: 1.0,
         x2: None,
@@ -277,6 +297,22 @@ fn apply_properties(
             item,
             property: property.clone(),
         });
+    }
+    if let Some(angle) = number("r")? {
+        cursor.angle_degrees = angle;
+    }
+    let origin_x = number("rx")?;
+    let origin_y = number("ry")?;
+    if let Some(origin_x) = origin_x {
+        cursor.origin_x = origin_x;
+    }
+    if let Some(origin_y) = origin_y {
+        cursor.origin_y = origin_y;
+    }
+    // VIA moves to the rotation origin's row whenever either coordinate is given. The column
+    // is not moved: every row starts at x = 0, and a key's x is added to the origin's.
+    if origin_x.is_some() || origin_y.is_some() {
+        cursor.y = cursor.origin_y;
     }
     if let Some(y) = number("y")? {
         cursor.y += y;
@@ -336,21 +372,27 @@ fn place_key(
         || cursor.y2.is_some()
         || cursor.width2.is_some()
         || cursor.height2.is_some();
+    let left = cursor.x + cursor.origin_x;
     Ok(DefinitionKey {
         matrix,
         bounds: Rectangle {
-            x: cursor.x,
+            x: left,
             y: cursor.y,
             width: cursor.width,
             height: cursor.height,
         },
         secondary_bounds: has_secondary.then(|| Rectangle {
-            x: cursor.x + cursor.x2.unwrap_or(0.0),
+            x: left + cursor.x2.unwrap_or(0.0),
             y: cursor.y + cursor.y2.unwrap_or(0.0),
             width: cursor.width2.unwrap_or(cursor.width),
             height: cursor.height2.unwrap_or(cursor.height),
         }),
         encoder,
+        rotation: (cursor.angle_degrees != 0.0).then_some(KeyRotation {
+            angle_degrees: cursor.angle_degrees,
+            origin_x: cursor.origin_x,
+            origin_y: cursor.origin_y,
+        }),
     })
 }
 
@@ -385,26 +427,78 @@ fn check_matrix(keys: &[DefinitionKey], rows: u8, columns: u8) -> Result<(), Def
     Ok(())
 }
 
-/// VIA draws a layout from the top-left corner of its keys, not from KLE's origin, so a
-/// definition whose first key is offset still starts at (0, 0).
+/// VIA draws a layout from the top-left corner of its keys as they appear after rotation,
+/// not from KLE's origin, so a definition whose first key is offset or turned still starts at
+/// (0, 0).
 fn move_origin_to_top_left(keys: &mut [DefinitionKey]) {
-    let rectangles = || {
-        keys.iter()
-            .flat_map(|key| std::iter::once(key.bounds).chain(key.secondary_bounds))
-    };
-    let left = rectangles()
-        .map(|rectangle| rectangle.x)
-        .fold(f32::INFINITY, f32::min);
-    let top = rectangles()
-        .map(|rectangle| rectangle.y)
-        .fold(f32::INFINITY, f32::min);
+    let corners = || keys.iter().flat_map(rotated_corners);
+    let left = corners()
+        .map(|corner| corner.0)
+        .fold(f64::INFINITY, f64::min);
+    let top = corners()
+        .map(|corner| corner.1)
+        .fold(f64::INFINITY, f64::min);
     if !left.is_finite() || !top.is_finite() {
         return;
     }
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "layout units are small f32 values"
+    )]
+    let (left, top) = (left as f32, top as f32);
     for key in keys.iter_mut() {
         for rectangle in std::iter::once(&mut key.bounds).chain(key.secondary_bounds.as_mut()) {
             rectangle.x -= left;
             rectangle.y -= top;
         }
+        if let Some(rotation) = key.rotation.as_mut() {
+            rotation.origin_x -= left;
+            rotation.origin_y -= top;
+        }
     }
+}
+
+/// The corners of a key's rectangles after its rotation. Computed in `f64` so a quarter turn
+/// does not leave rounding noise in the layout's offset.
+fn rotated_corners(key: &DefinitionKey) -> Vec<(f64, f64)> {
+    let (sin, cos) = key.rotation.map_or((0.0, 1.0), |rotation| {
+        f64::from(rotation.angle_degrees).to_radians().sin_cos()
+    });
+    let origin = key.rotation.map_or((0.0, 0.0), |rotation| {
+        (f64::from(rotation.origin_x), f64::from(rotation.origin_y))
+    });
+    // VIA turns the box around both rectangles, not each rectangle, so a turned ISO Enter
+    // measures the same here as in VIA.
+    let rectangles: Vec<Rectangle> = std::iter::once(key.bounds)
+        .chain(key.secondary_bounds)
+        .collect();
+    let left = rectangles
+        .iter()
+        .map(|r| f64::from(r.x))
+        .fold(f64::INFINITY, f64::min);
+    let top = rectangles
+        .iter()
+        .map(|r| f64::from(r.y))
+        .fold(f64::INFINITY, f64::min);
+    let right = rectangles
+        .iter()
+        .map(|r| f64::from(r.x + r.width))
+        .fold(f64::NEG_INFINITY, f64::max);
+    let bottom = rectangles
+        .iter()
+        .map(|r| f64::from(r.y + r.height))
+        .fold(f64::NEG_INFINITY, f64::max);
+    [(left, top), (right, top), (left, bottom), (right, bottom)]
+        .into_iter()
+        .map(|(x, y)| {
+            if key.rotation.is_none() {
+                return (x, y);
+            }
+            let (offset_x, offset_y) = (x - origin.0, y - origin.1);
+            (
+                origin.0 + offset_x * cos - offset_y * sin,
+                origin.1 + offset_x * sin + offset_y * cos,
+            )
+        })
+        .collect()
 }

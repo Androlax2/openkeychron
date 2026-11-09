@@ -20,7 +20,7 @@ mod rgb;
 
 pub use client::{Via, ViaError};
 pub use command::REPORT_LEN;
-pub use definition::{DefinitionError, DefinitionKey, ViaDefinition};
+pub use definition::{DefinitionError, DefinitionKey, KeyRotation, ViaDefinition};
 pub use keycode::{Keycode, KeycodeError, KeycodeKind, KeycodeWrapper, LayerAction};
 pub use keycode_name::{WrapperName, modifiers_name};
 pub use keymap_write::EncoderDirection;
