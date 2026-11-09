@@ -1,5 +1,5 @@
 // Test data only.
-import type { Bounds, EditableKeymap, Encoder, Key, Keymap } from "../lib/bindings";
+import type { Bounds, EditableKeymap, Encoder, Key, Keymap, Rotation } from "../lib/bindings";
 
 // A hand-written, cut-down V5 Max FR ISO keymap: two rows of real positions, the ISO Enter,
 // the 1u Num Lock and two unused matrix slots. Bounds come from the V5 Max ISO layout in openkeychron-via.
@@ -34,6 +34,7 @@ function physicalKey(
     isPhysical: true,
     bounds,
     secondaryBounds,
+    rotation: null,
     keycode,
     name,
     azertyText: AZERTY_TEXT.get(keycode) ?? null,
@@ -52,6 +53,7 @@ const unusedSlot =
     isPhysical: false,
     bounds: null,
     secondaryBounds: null,
+    rotation: null,
     keycode,
     name,
     azertyText: null,
@@ -190,5 +192,22 @@ export function withKeycode(
             ),
           },
     ),
+  };
+}
+
+/** `keymap` with the key at `row`, `column` turned by `rotation` on every layer. */
+export function withRotation(
+  keymap: Keymap,
+  position: { row: number; column: number },
+  rotation: Rotation,
+): Keymap {
+  return {
+    ...keymap,
+    layers: keymap.layers.map((layer) => ({
+      ...layer,
+      keys: layer.keys.map((key) =>
+        key.row === position.row && key.column === position.column ? { ...key, rotation } : key,
+      ),
+    })),
   };
 }

@@ -4,8 +4,8 @@
 
 use openkeychron_hid::{HidTransport, KeychronDevice};
 use openkeychron_via::{
-    DeviceRegistry, EncoderDirection, FRENCH_AZERTY, Keycode, Legends, Rectangle, RegisteredLayout,
-    RegisteredModel, Via, ViaError,
+    DeviceRegistry, EncoderDirection, FRENCH_AZERTY, KeyRotation, Keycode, Legends, Rectangle,
+    RegisteredLayout, RegisteredModel, Via, ViaError,
 };
 use serde::Serialize;
 
@@ -82,6 +82,9 @@ pub struct Key {
     pub bounds: Option<Bounds>,
     /// A second rectangle that, with `bounds`, makes a shape such as ISO Enter.
     pub secondary_bounds: Option<Bounds>,
+    /// How the key is turned after `bounds` and `secondary_bounds` place it. Absent for a key
+    /// that is not rotated.
+    pub rotation: Option<Rotation>,
     pub keycode: u16,
     /// QMK's name for `keycode`, such as `LCTL(C)`, or the connected model's name for a
     /// Keychron custom keycode, such as `LOPTN`. Absent for any other custom or unknown
@@ -115,10 +118,32 @@ impl From<Rectangle> for Bounds {
     }
 }
 
+/// A turn of a key about a point, in the same key units as `Bounds`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct Rotation {
+    /// Clockwise on screen, in degrees.
+    pub angle_degrees: f32,
+    pub origin_x: f32,
+    pub origin_y: f32,
+}
+
+impl From<KeyRotation> for Rotation {
+    fn from(rotation: KeyRotation) -> Self {
+        Self {
+            angle_degrees: rotation.angle_degrees,
+            origin_x: rotation.origin_x,
+            origin_y: rotation.origin_y,
+        }
+    }
+}
+
 /// What the layout says about one physical key; definitions from a file carry no legends.
 struct Placement {
     bounds: Rectangle,
     secondary_bounds: Option<Rectangle>,
+    rotation: Option<KeyRotation>,
     legends: Option<Legends>,
     encoder: Option<u8>,
 }
@@ -128,6 +153,7 @@ fn placement(layout: &RegisteredLayout, row: u8, column: u8) -> Option<Placement
         RegisteredLayout::BuiltIn(layout) => layout.key(row, column).map(|key| Placement {
             bounds: key.bounds,
             secondary_bounds: key.secondary_bounds,
+            rotation: None,
             legends: Some(key.legends),
             encoder: key.encoder,
         }),
@@ -135,6 +161,7 @@ fn placement(layout: &RegisteredLayout, row: u8, column: u8) -> Option<Placement
             definition.key(row, column).map(|key| Placement {
                 bounds: key.bounds,
                 secondary_bounds: key.secondary_bounds,
+                rotation: key.rotation,
                 legends: None,
                 encoder: key.encoder,
             })
@@ -261,6 +288,10 @@ fn keys(model: &RegisteredModel, keycodes: &[Keycode]) -> Vec<Key> {
                     .as_ref()
                     .and_then(|placement| placement.secondary_bounds)
                     .map(Bounds::from),
+                rotation: placement
+                    .as_ref()
+                    .and_then(|placement| placement.rotation)
+                    .map(Rotation::from),
                 keycode: u16::from(*keycode),
                 name: model.keycode_name(*keycode),
                 azerty_text: FRENCH_AZERTY.typed_by(*keycode),
@@ -274,7 +305,7 @@ fn keys(model: &RegisteredModel, keycodes: &[Keycode]) -> Vec<Key> {
 mod tests {
     use openkeychron_via::{DeviceRegistry, ViaDefinition};
 
-    use super::{Bounds, Encoder, EncoderKeycode, Key, Keymap, keys, read};
+    use super::{Bounds, Encoder, EncoderKeycode, Key, Keymap, Rotation, keys, read};
     use crate::test_support::{lend, load_fixture, replay};
 
     #[test]
@@ -309,6 +340,7 @@ mod tests {
                     height: 1.0,
                 }),
                 secondary_bounds: None,
+                rotation: None,
                 keycode: 0x0014,
                 name: Some("Q".to_owned()),
                 azerty_text: Some('a'),
@@ -485,6 +517,56 @@ mod tests {
                     height: 1.0,
                 })
             )
+        );
+    }
+
+    #[test]
+    fn gives_a_key_of_a_via_definition_its_rotation() {
+        let text = std::fs::read_to_string(crate::test_support::synthetic_path(
+            "via-definition-rotated.json",
+        ))
+        .unwrap();
+        let definition = ViaDefinition::from_json(&text).unwrap();
+        let expected = definition
+            .keys
+            .iter()
+            .map(|key| (key.matrix, key.rotation))
+            .collect::<Vec<_>>();
+        let mut registry = DeviceRegistry::built_in();
+        registry.register(definition).unwrap();
+        let model = registry.model(0x3434, 0x0950).unwrap();
+        let layer_size = usize::from(model.layout().rows()) * usize::from(model.layout().columns());
+        let placed = keys(model, &vec![0u16.into(); layer_size]);
+        for (matrix, rotation) in expected {
+            let key = placed
+                .iter()
+                .find(|key| [key.row, key.column] == matrix)
+                .unwrap();
+            assert_eq!(
+                key.rotation,
+                rotation.map(|rotation| Rotation {
+                    angle_degrees: rotation.angle_degrees,
+                    origin_x: rotation.origin_x,
+                    origin_y: rotation.origin_y,
+                })
+            );
+        }
+        assert!(placed.iter().any(|key| key.rotation.is_some()));
+        assert!(
+            placed
+                .iter()
+                .any(|key| key.is_physical && key.rotation.is_none())
+        );
+    }
+
+    #[test]
+    fn gives_a_built_in_key_no_rotation() {
+        let keymap = read_synthetic_keymap();
+        assert!(
+            keymap.layers[0]
+                .keys
+                .iter()
+                .all(|key| key.rotation.is_none())
         );
     }
 
