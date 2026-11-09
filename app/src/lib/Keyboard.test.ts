@@ -117,9 +117,14 @@ describe("Keyboard", () => {
     expect(texts).toEqual(expect.arrayContaining(["é", "2", "~"]));
   });
 
-  it("shows the QMK name of the keycode the shown layer assigns to each key", () => {
+  it("shows what a French AZERTY host types for the keycode the shown layer assigns to a key", () => {
     const view = render();
-    expect(keyNamed(view, "A").querySelector("text.keycode")?.textContent?.trim()).toBe("Q");
+    expect(keyNamed(view, "A").querySelector("text.keycode")?.textContent?.trim()).toBe("a");
+  });
+
+  it("shows the QMK name of a keycode the French AZERTY layout does not cover", () => {
+    const view = render();
+    expect(keyNamed(view, "Enter").querySelector("text.keycode")?.textContent?.trim()).toBe("ENT");
   });
 
   it("shows a keycode without a name as its raw hexadecimal value", () => {
@@ -129,7 +134,12 @@ describe("Keyboard", () => {
 
   it("gives the keycode's name and raw value in the key's accessible name", () => {
     const view = render();
-    expect(keyNamed(view, "A").getAttribute("aria-label")).toBe("A, keycode Q (0x0014)");
+    expect(keyNamed(view, "A").getAttribute("aria-label")).toBe("A, types a, keycode Q (0x0014)");
+  });
+
+  it("leaves the typed character out of the accessible name of a keycode AZERTY does not cover", () => {
+    const view = render();
+    expect(keyNamed(view, "Enter").getAttribute("aria-label")).toBe("Enter, keycode ENT (0x0028)");
   });
 
   it("leaves a keycode name that fits its keycap at its normal size", () => {
@@ -150,6 +160,14 @@ describe("Keyboard", () => {
     click(keyNamed(view, "é"));
     expect(view.querySelector(".selection")?.textContent?.trim()).toBe(
       "Selected: é (row 0, column 1), keycode 2 (0x001f)",
+    );
+  });
+
+  it("keeps QMK's name visible for the selected key that shows what it types", () => {
+    const view = render();
+    click(keyNamed(view, "A"));
+    expect(view.querySelector(".selection")?.textContent?.trim()).toBe(
+      "Selected: A (row 1, column 0), keycode Q (0x0014)",
     );
   });
 

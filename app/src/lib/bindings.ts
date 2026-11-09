@@ -63,6 +63,11 @@ secondaryBounds: Bounds | null, keycode: number,
  */
 name: string | null, 
 /**
+ * The character `keycode` types alone on a French AZERTY host, such as `a` for `KC_Q`.
+ * Absent when that layout does not cover the keycode: show `name` then.
+ */
+azertyText: string | null, 
+/**
  * The index of the encoder whose press this key is, such as the V5 Max's knob.
  */
 encoder: number | null, };

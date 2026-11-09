@@ -2,6 +2,7 @@
 //! US-ANSI `ascii_to_keycode_lut`. Each character becomes taps on the key that types it,
 //! wrapped in Shift or AltGr when it needs one.
 
+use crate::keycode::{Keycode, KeycodeKind};
 use crate::macros::{MacroAction, MacroError};
 
 /// A host keyboard layout that macro text can be typed for.
@@ -268,6 +269,19 @@ impl TextLayout {
         self.dead_keycodes.contains(&keycode)
     }
 
+    /// The character a basic keycode types alone on a host with this layout, such as `a` for
+    /// `KC_Q` on French AZERTY. `None` for what types no character by itself: a modifier,
+    /// Space, a dead key, a keycode the layout does not cover, and every keycode that is not
+    /// a plain basic one. Callers show QMK's name then, never a guess.
+    #[must_use]
+    pub fn typed_by(&self, keycode: Keycode) -> Option<char> {
+        let KeycodeKind::Basic(key) = keycode.kind() else {
+            return None;
+        };
+        self.character(plain(key))
+            .filter(|typed| !typed.is_whitespace())
+    }
+
     fn keystroke(&self, character: char) -> Result<Keystroke, MacroError> {
         if self.dead_keys.contains(&character) {
             return Err(MacroError::DeadKeyText {
@@ -296,10 +310,43 @@ impl TextLayout {
 #[cfg(test)]
 mod tests {
     use super::{FRENCH_AZERTY, TypedStep};
+    use crate::keycode::Keycode;
     use crate::macros::{MacroAction, MacroError, decode_macro, encode_macro};
 
     const SHIFT: u8 = 0xe1;
     const ALT_GR: u8 = 0xe6;
+
+    fn typed_by_french(raw: u16) -> Option<char> {
+        FRENCH_AZERTY.typed_by(Keycode::from(raw))
+    }
+
+    #[test]
+    fn names_the_letter_a_basic_keycode_types_on_french_azerty() {
+        assert_eq!(typed_by_french(0x0004), Some('q'));
+        assert_eq!(typed_by_french(0x0014), Some('a'));
+        assert_eq!(typed_by_french(0x0033), Some('m'));
+    }
+
+    #[test]
+    fn names_the_symbol_a_number_row_keycode_types_on_french_azerty() {
+        assert_eq!(typed_by_french(0x001e), Some('&'));
+        assert_eq!(typed_by_french(0x001f), Some('é'));
+    }
+
+    #[test]
+    fn gives_no_character_to_a_dead_key() {
+        assert_eq!(typed_by_french(0x002f), None);
+    }
+
+    #[test]
+    fn gives_no_character_to_no_key_space_or_a_modifier() {
+        assert_eq!([0x0000, 0x002c, 0x00e1].map(typed_by_french), [None; 3]);
+    }
+
+    #[test]
+    fn gives_no_character_to_a_keycode_that_is_not_a_basic_one() {
+        assert_eq!([0x0214, 0x4004, 0x5201].map(typed_by_french), [None; 3]);
+    }
 
     fn french(text: &str) -> Result<Vec<MacroAction>, MacroError> {
         FRENCH_AZERTY.actions_for_text(text)
