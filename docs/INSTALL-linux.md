@@ -88,13 +88,17 @@ With the deb:
 
 ```sh
 sudo apt install ./openkeychron_<version>_amd64.deb
+sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=hidraw --action=change
 ```
 
-udev reads the new rule by itself; the trigger (or unplugging and replugging the receiver)
-applies it to a device that is already plugged in. `sudo apt remove openkeychron` removes the
-app and the rule. A copy of the rule in `/etc/udev/rules.d/` with the same name overrides the
-packaged one: remove it if you installed the rule by hand before.
+The trigger (or unplugging and replugging the receiver) applies the rule to a device that is
+already plugged in. Start the app from the menu entry "openkeychron", or run `openkeychron-app`.
+
+`sudo apt remove openkeychron` removes the app and the rule. Then unplug and replug the receiver
+(or the keyboard cable): access already granted to a plugged-in device can stay until it is
+replugged. A copy of the rule in `/etc/udev/rules.d/` with the same name overrides the packaged
+one: remove it if you installed the rule by hand before.
 
 With the AppImage, install the rule [below](#install), then:
 
@@ -135,6 +139,9 @@ sudo rm /etc/udev/rules.d/70-openkeychron.rules
 sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=hidraw --action=change
 ```
+
+Then unplug and replug the receiver (or the keyboard cable): access already granted to a
+plugged-in device can stay until it is replugged.
 
 ## Without systemd-logind
 

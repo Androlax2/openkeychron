@@ -341,9 +341,9 @@ writes both formats, needs no Debian tools for the deb, and keeps the package me
   directory for rules that packages own, so `/etc/udev/rules.d/` stays the administrator's.
   It maps the file in `packaging/linux/`, so the repository holds one copy of the rule; a test
   in `app/src-tauri/tests/linux_bundle.rs` fails if the mapping drifts.
-- **No maintainer scripts.** udev picks up a new rule file on its own; applying it to a device
-  that is already plugged in is one documented command, or a replug. A post-install script
-  would run as root for that one step.
+- **No maintainer scripts.** Reloading the rules and applying them to a device that is already
+  plugged in are two documented commands, or a replug. A post-install script would run as root
+  for that one step.
 - **The AppImage cannot install the rule**, so `docs/INSTALL-linux.md` explains the manual
   install. It is the package that runs on Arch, which has no deb support.
 
