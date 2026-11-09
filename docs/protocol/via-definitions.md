@@ -29,9 +29,17 @@ Only `name`, `vendorId`, `productId` (hexadecimal strings such as `"0x3434"`),
   size, `x2`, `y2`, `w2` and `h2` set a second rectangle relative to the key (ISO Enter).
   `w2` and `h2` default to `w` and `h`. Size and second rectangle reset after each key;
   `x` and `y` offsets accumulate.
+- `r` is a rotation angle in degrees (clockwise on screen) and `rx`, `ry` its origin. They
+  carry to every later key, across rows, until another object changes them. Giving `rx` or
+  `ry` moves the cursor to row `ry`, and a `y` in the same object is added after that. A key's
+  x is its cursor x plus `rx` (a row still starts at cursor x = 0), so a row after a rotation
+  object starts at `rx`. `DefinitionKey::bounds` is the key before it is turned; its
+  `rotation` (`None` at angle 0) holds the angle and origin, and applies to the second
+  rectangle too.
 - A string is a key. Its labels are split on `\n` and trimmed. Label 0 is the matrix position
   `row,column`; label 9 is an encoder `e<index>`, which marks the encoder's press.
-- The layout is shifted so its top-left key edge is at (0, 0), as VIA draws it.
+- The layout is shifted so its top-left key edge is at (0, 0), as VIA draws it. Rotated keys
+  count at their turned corners, and their origin shifts with them.
 
 Colour (`c`, `t`), which VIA uses only for its key colour theme, and every other KLE property
 VIA ignores are ignored.
@@ -44,7 +52,6 @@ approximating:
 
 | Input | Why |
 |---|---|
-| `r`, `rx`, `ry` | Rotated keys need geometry `Rectangle` cannot hold |
 | `a` | Label alignment renumbers labels, so the matrix label could be misread |
 | `d` | Decals are not keys; supporting them needs keys without a matrix position |
 | A non-empty `layouts.labels`, or a key with label 3 | Layout options; only the default option exists today |
@@ -58,9 +65,9 @@ approximating:
 Checked once against all 282 files under `keyboards/keychron/*/via_json/` at Keychron QMK
 revision `2b493ff95f2665db719b1e95c91babb5036e72f3` (not committed, see above):
 
-- 249 load.
-- 31 use rotated keys (K11 Max, K15 Max, Q8, Q8 Max, Q10, Q10 Max, Q13 Max, Q14 Max, V8, V8 Max,
-  V10, V10 Max) and are rejected.
+- 249 loaded; 31 were rejected for rotated keys (K11 Max, K15 Max, Q8, Q8 Max, Q10, Q10 Max,
+  Q13 Max, Q14 Max, V8, V8 Max, V10, V10 Max) before rotation was read. The rotated files have
+  not been re-loaded since; rotation is tested only on a hand-written definition.
 - `k17_max_jis_knob_white.json` places key `1,19` outside its 6 × 19 matrix, and
   `k7_max_ansi_white.json` is empty; both are rejected.
 - Loading `v5_max_iso_encoder.json` gives exactly the matrix positions, rectangles, second
@@ -88,6 +95,7 @@ cargo test -p openkeychron-via --locked --test definition
 cargo test -p openkeychron-cli --locked --test keymap_definition
 ```
 
-The tests use `fixtures/synthetic/via-definition-second-model.json`, a hand-written 2 × 4
+The tests use `fixtures/synthetic/via-definition-rotated.json`, a hand-written definition with
+rotated keys, and `fixtures/synthetic/via-definition-second-model.json`, a hand-written 2 × 4
 definition that reuses the V5 Max ANSI ID (`3434:0950`) only to stand for a second model, and
 `fixtures/synthetic/cli-keymap-second-model.toml`, its hand-written keymap replay.

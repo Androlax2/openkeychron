@@ -7,8 +7,8 @@ mod tests {
     use std::path::PathBuf;
 
     use openkeychron_via::{
-        DefinitionError, DefinitionKey, DeviceRegistry, Rectangle, RegistryError, ViaDefinition,
-        WriteAccess,
+        DefinitionError, DefinitionKey, DeviceRegistry, KeyRotation, Rectangle, RegistryError,
+        ViaDefinition, WriteAccess,
     };
 
     fn second_model_text() -> String {
@@ -102,6 +102,7 @@ mod tests {
                 bounds: rectangle(1.75, 1.25, 1.25, 2.0),
                 secondary_bounds: Some(rectangle(1.5, 1.25, 1.5, 1.0)),
                 encoder: None,
+                rotation: None,
             })
         );
     }
@@ -213,7 +214,7 @@ mod tests {
 
     #[test]
     fn rejects_properties_that_would_change_geometry_it_cannot_represent() {
-        for property in ["r", "rx", "ry", "a", "d"] {
+        for property in ["a", "d"] {
             assert_eq!(
                 ViaDefinition::from_json(&with_keymap_row(&format!(
                     r#"["0,0", {{"{property}": 1}}, "0,1"]"#
@@ -226,6 +227,126 @@ mod tests {
                 "{property}"
             );
         }
+    }
+
+    fn rotated_model() -> ViaDefinition {
+        let text = std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../fixtures/synthetic/via-definition-rotated.json"),
+        )
+        .unwrap();
+        ViaDefinition::from_json(&text).unwrap()
+    }
+
+    fn rotation(angle_degrees: f32, origin_x: f32, origin_y: f32) -> KeyRotation {
+        KeyRotation {
+            angle_degrees,
+            origin_x,
+            origin_y,
+        }
+    }
+
+    #[test]
+    fn gives_a_rotated_key_its_angle_and_origin() {
+        let definition = rotated_model();
+        let key = definition.key(1, 0).unwrap();
+        assert_eq!(key.rotation, Some(rotation(15.0, 3.0, 2.0)));
+        assert_eq!(key.bounds, rectangle(3.0, 2.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn moves_the_cursor_to_the_rotation_origin_and_advances_along_the_row() {
+        assert_eq!(
+            rotated_model().key(1, 1).unwrap().bounds,
+            rectangle(4.0, 2.0, 1.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn carries_the_rotation_into_the_following_rows() {
+        let definition = rotated_model();
+        let key = definition.key(0, 2).unwrap();
+        assert_eq!(key.rotation, Some(rotation(15.0, 3.0, 2.0)));
+        assert_eq!(key.bounds, rectangle(3.0, 3.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn stops_rotating_keys_when_the_angle_returns_to_zero() {
+        let definition = rotated_model();
+        let key = definition.key(1, 2).unwrap();
+        assert_eq!(key.rotation, None);
+        assert_eq!(key.bounds, rectangle(0.0, 4.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn leaves_keys_before_any_rotation_unrotated() {
+        let definition = rotated_model();
+        assert_eq!(definition.key(0, 0).unwrap().rotation, None);
+        assert_eq!(definition.key(0, 1).unwrap().rotation, None);
+    }
+
+    #[test]
+    fn adds_a_y_offset_in_the_same_object_after_moving_to_the_rotation_origin() {
+        let definition = ViaDefinition::from_json(&with_keymap_row(
+            r#"["0,0"], [{"r": 10, "rx": 1, "ry": 3, "y": 0.5}, "0,1"]"#,
+        ))
+        .unwrap();
+        assert_eq!(
+            definition.key(0, 1).unwrap().bounds,
+            rectangle(1.0, 3.5, 1.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn shifts_the_layout_by_the_rotated_top_left_edge() {
+        let definition =
+            ViaDefinition::from_json(&with_keymap_row(r#"[{"r": 90, "rx": 2, "ry": 1}, "0,0"]"#))
+                .unwrap();
+        let key = definition.key(0, 0).unwrap();
+        // A quarter turn about (2, 1) puts the key's edges at x 1..2 and y 1..2.
+        assert_eq!(key.bounds, rectangle(1.0, 0.0, 1.0, 1.0));
+        let origin = key.rotation.unwrap();
+        assert_eq!(
+            (origin.angle_degrees, origin.origin_x, origin.origin_y),
+            (90.0, 1.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn shifts_the_rotation_origin_with_the_bounds() {
+        let definition = ViaDefinition::from_json(&with_keymap_row(
+            r#"[{"x": 2, "y": 1}, "0,0", {"r": -90, "rx": 5, "ry": 4}, "0,1"]"#,
+        ))
+        .unwrap();
+        // Key 0,1 sits at x 3 + 5 = 8, y 4, a quarter back about (5, 4): after the turn it
+        // spans x 5..6, y 0..1. The layout's left edge is key 0,0's x = 2 and its top is the
+        // turned key's y = 0, so everything moves left by 2 and up by 0.
+        let key = definition.key(0, 1).unwrap();
+        assert_eq!(key.bounds, rectangle(6.0, 4.0, 1.0, 1.0));
+        assert_eq!(key.rotation, Some(rotation(-90.0, 3.0, 4.0)));
+    }
+
+    #[test]
+    fn measures_a_rotated_two_rectangle_key_by_the_box_around_both() {
+        let definition = ViaDefinition::from_json(&with_keymap_row(
+            r#"[{"r": 90, "rx": 2, "ry": 1, "w": 1.25, "h": 2, "x2": -0.25, "w2": 1.5, "h2": 1}, "0,0"]"#,
+        ))
+        .unwrap();
+        // The box around both rectangles is x 1.75..3.25, y 1..3. Turned a quarter about
+        // (2, 1) it spans x 0..2, y 0.75..2.25, so the layout moves up by 0.75.
+        let key = definition.key(0, 0).unwrap();
+        assert_eq!(key.bounds, rectangle(2.0, 0.25, 1.25, 2.0));
+    }
+
+    #[test]
+    fn moves_to_the_rotation_origin_row_in_the_middle_of_a_row() {
+        let definition =
+            ViaDefinition::from_json(&with_keymap_row(r#"["0,0", {"r": 20, "ry": 2}, "0,1"]"#))
+                .unwrap();
+        assert_eq!(
+            definition.key(0, 1).unwrap().bounds,
+            rectangle(1.0, 2.0, 1.0, 1.0)
+        );
     }
 
     #[test]

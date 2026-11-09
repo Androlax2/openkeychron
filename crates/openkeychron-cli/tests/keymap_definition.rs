@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn an_invalid_definition_names_the_file_and_the_problem() {
-        let layout = edited_definition(r#""0,1""#, r#""0,1", {"r": 15}"#);
+        let layout = edited_definition(r#""0,1""#, r#""0,1", {"a": 7}"#);
         let output = run_fixture(
             &["keymap", "show"],
             &layout,
@@ -275,7 +275,7 @@ mod tests {
         std::fs::remove_file(&layout).unwrap();
         assert_refused(&output, &format!("layout file {}: ", layout.display()));
         assert!(
-            stderr(&output).contains(r#"uses "r""#),
+            stderr(&output).contains(r#"uses "a""#),
             "{}",
             stderr(&output)
         );

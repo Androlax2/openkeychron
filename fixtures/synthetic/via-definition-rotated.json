@@ -1,0 +1,15 @@
+{
+  "_comment": "Hand-written synthetic VIA definition with rotated keys, for openkeychron tests. Not copied from Keychron or the VIA keyboards repository, and not any keyboard's real geometry.",
+  "name": "Synthetic rotated model",
+  "vendorId": "0x3434",
+  "productId": "0x0950",
+  "matrix": { "rows": 2, "cols": 4 },
+  "layouts": {
+    "keymap": [
+      ["0,0", "0,1"],
+      [{ "r": 15, "rx": 3, "ry": 2 }, "1,0", "1,1"],
+      ["0,2"],
+      [{ "r": 0, "rx": 0, "ry": 4 }, "1,2"]
+    ]
+  }
+}
