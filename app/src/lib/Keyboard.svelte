@@ -8,6 +8,7 @@ export type KeySelection = { layer: number; row: number; column: number };
 
 <script lang="ts">
 import type { Bounds, Encoder, EncoderKeycode, Key, Keymap } from "./bindings";
+import { keyExtent } from "./key-geometry";
 import { arrowDirection, neighbour } from "./keyboard-navigation";
 import { fitKeycodeLabel, shortenKeycodeName } from "./keycode-label";
 import { describeKeycode, hex } from "./keycode-text";
@@ -42,8 +43,8 @@ const shownLayer = $derived(keymap.layers[layerPosition]);
 const placedKeys = $derived(
   (shownLayer?.keys ?? []).filter((key): key is PlacedKey => key.bounds !== null),
 );
-const width = $derived(Math.max(0, ...placedKeys.map(farRight)) * KEY_UNIT);
-const height = $derived(Math.max(0, ...placedKeys.map(farBottom)) * KEY_UNIT);
+const width = $derived(Math.max(0, ...placedKeys.map((key) => keyExtent(key).right)) * KEY_UNIT);
+const height = $derived(Math.max(0, ...placedKeys.map((key) => keyExtent(key).bottom)) * KEY_UNIT);
 const tabStop = $derived(focused ?? selected ?? placedKeys[0] ?? null);
 const selectedKey = $derived(placedKeys.find((key) => isAt(key, selected)) ?? null);
 const selectionSummary = $derived(
@@ -52,16 +53,14 @@ const selectionSummary = $derived(
     : `Selected: ${baseLegend(selectedKey)} (row ${selectedKey.row}, column ${selectedKey.column}), keycode ${describeKeycode(selectedKey)}`,
 );
 
-function farRight(key: PlacedKey): number {
-  const secondary = key.secondaryBounds;
-  const right = key.bounds.x + key.bounds.width;
-  return secondary === null ? right : Math.max(right, secondary.x + secondary.width);
-}
-
-function farBottom(key: PlacedKey): number {
-  const secondary = key.secondaryBounds;
-  const bottom = key.bounds.y + key.bounds.height;
-  return secondary === null ? bottom : Math.max(bottom, secondary.y + secondary.height);
+/** Placing the key, then turning it about its rotation origin, which is in layout units. */
+function keyTransform(key: PlacedKey): string {
+  const placement = `translate(${key.bounds.x * KEY_UNIT} ${key.bounds.y * KEY_UNIT})`;
+  if (key.rotation === null) {
+    return placement;
+  }
+  const { angleDegrees, originX, originY } = key.rotation;
+  return `rotate(${angleDegrees} ${originX * KEY_UNIT} ${originY * KEY_UNIT}) ${placement}`;
 }
 
 function isAt(key: MatrixPosition, position: MatrixPosition | null): boolean {
@@ -244,7 +243,7 @@ function onTabKeydown(event: KeyboardEvent): void {
               tabindex={isAt(key, tabStop) ? 0 : -1}
               data-row={key.row}
               data-column={key.column}
-              transform="translate({key.bounds.x * KEY_UNIT} {key.bounds.y * KEY_UNIT})"
+              transform={keyTransform(key)}
               onclick={() => select(key)}
               onkeydown={(event) => onKeyKeydown(event, key)}
               onfocus={() => {

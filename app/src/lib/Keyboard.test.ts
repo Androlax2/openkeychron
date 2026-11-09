@@ -1,6 +1,6 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, describe, expect, it } from "vitest";
-import { KEYMAP, KNOB_KEYMAP, withKeycode } from "../test/synthetic-keymap";
+import { KEYMAP, KNOB_KEYMAP, withKeycode, withRotation } from "../test/synthetic-keymap";
 import type { Keymap } from "./bindings";
 import Keyboard, { KEY_UNIT, type KeySelection } from "./Keyboard.svelte";
 
@@ -89,6 +89,58 @@ describe("Keyboard", () => {
     expect(view.querySelector("svg")?.getAttribute("viewBox")).toBe(
       `0 0 ${16.5 * KEY_UNIT} ${4.25 * KEY_UNIT}`,
     );
+  });
+
+  it("leaves a key without a rotation unturned", () => {
+    const view = render();
+    expect(keyNamed(view, "A").getAttribute("transform")).not.toContain("rotate");
+  });
+
+  it("turns a rotated key about its origin, after placing it", () => {
+    const keymap = withRotation(
+      KEYMAP,
+      { row: 1, column: 0 },
+      {
+        angleDegrees: 15,
+        originX: 2,
+        originY: 3,
+      },
+    );
+    const view = render(keymap);
+    expect(keyNamed(view, "A").getAttribute("transform")).toBe(
+      `rotate(15 ${2 * KEY_UNIT} ${3 * KEY_UNIT}) translate(${1.5 * KEY_UNIT} ${2.25 * KEY_UNIT})`,
+    );
+  });
+
+  it("turns a rotated ISO Enter as one key, so both of its rectangles stay joined", () => {
+    const keymap = withRotation(
+      KEYMAP,
+      { row: 1, column: 3 },
+      {
+        angleDegrees: 90,
+        originX: 13.5,
+        originY: 2.25,
+      },
+    );
+    const enter = keyNamed(render(keymap), "Enter");
+    expect(enter.getAttribute("transform")).toContain("rotate(90 ");
+    expect(enter.querySelectorAll("rect.cap-fill")).toHaveLength(2);
+  });
+
+  it("sizes the drawing to the far edges of rotated keys", () => {
+    const keymap = withRotation(
+      KEYMAP,
+      { row: 0, column: 4 },
+      {
+        angleDegrees: 45,
+        originX: 15.5,
+        originY: 1.25,
+      },
+    );
+    const viewBox = render(keymap).querySelector("svg")?.getAttribute("viewBox") ?? "";
+    const [, , drawnWidth, drawnHeight] = viewBox.split(" ").map(Number);
+    expect(drawnWidth).toBeCloseTo((15.5 + Math.SQRT1_2) * KEY_UNIT);
+    expect(drawnHeight).toBeCloseTo(4.25 * KEY_UNIT);
   });
 
   it("draws the ISO Enter from both of its rectangles, relative to the key", () => {

@@ -60,7 +60,12 @@ bounds: Bounds | null,
 /**
  * A second rectangle that, with `bounds`, makes a shape such as ISO Enter.
  */
-secondaryBounds: Bounds | null, keycode: number, 
+secondaryBounds: Bounds | null, 
+/**
+ * How the key is turned after `bounds` and `secondary_bounds` place it. Absent for a key
+ * that is not rotated.
+ */
+rotation: Rotation | null, keycode: number, 
 /**
  * QMK's name for `keycode`, such as `LCTL(C)`, or the connected model's name for a
  * Keychron custom keycode, such as `LOPTN`. Absent for any other custom or unknown
@@ -92,6 +97,12 @@ export type EncoderKeycode = { keycode: number,
 name: string | null, };
 
 export type Bounds = { x: number, y: number, width: number, height: number, };
+
+export type Rotation = { 
+/**
+ * Clockwise on screen, in degrees.
+ */
+angleDegrees: number, originX: number, originY: number, };
 
 export type EditableKeymap = { keymap: Keymap, 
 /**
