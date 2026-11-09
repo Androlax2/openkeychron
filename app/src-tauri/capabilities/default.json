@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window may list devices and read their info, keymap, macros and settings. No write command exists yet.",
+  "windows": ["main"],
+  "permissions": [
+    "allow-list-devices",
+    "allow-read-info",
+    "allow-read-keymap",
+    "allow-read-macros",
+    "allow-read-settings"
+  ]
+}

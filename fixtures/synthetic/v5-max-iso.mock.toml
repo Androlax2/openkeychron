@@ -1,0 +1,11 @@
+# Hand-written mock keyboard for the app's mock mode; NOT a recording or a fixture.
+# The app seeds a stateful fake V5 Max ISO from it (crates/openkeychron-mock): reads answer
+# from its state and writes change it. See docs/DEVELOPMENT.md, "The app in mock mode".
+format_version = 1
+
+[device]
+name = "mock V5 Max ISO"
+vendor_id = 13364
+product_id = 2385
+usage_page = 65376
+usage = 97

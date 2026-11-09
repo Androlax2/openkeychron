@@ -10,7 +10,7 @@ const REPLY_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// A VIA session over one raw HID interface.
 ///
-/// Every method here only reads; none changes the keyboard.
+/// Methods that change settings or keymaps explicitly document their writes and read-back.
 #[derive(Debug)]
 pub struct Via<T> {
     transport: T,
@@ -45,6 +45,77 @@ pub enum ViaError {
 
     #[error("set {written}, but the keyboard now reports {read}; nothing was saved")]
     ReadBackMismatch { written: String, read: String },
+
+    #[error("expected at least one keymap layer, got {count}")]
+    InvalidLayerCount { count: u8 },
+
+    #[error("keymap requires 1–32768 keys to fit its 16-bit byte offsets, got {key_count}")]
+    InvalidKeymapSize { key_count: usize },
+
+    #[error(
+        "asked for {expected_size} keymap bytes at offset {expected_offset}, reply echoes {actual_size} bytes at offset {actual_offset}"
+    )]
+    WrongKeymapChunk {
+        expected_offset: u16,
+        actual_offset: u16,
+        expected_size: u8,
+        actual_size: u8,
+    },
+
+    #[error("VIA command 0x{command:02x} expected keymap address {expected:?}, got {actual:?}")]
+    WrongKeymapAddress {
+        command: u8,
+        expected: [u8; 3],
+        actual: [u8; 3],
+    },
+
+    #[error(
+        "VIA command 0x{command:02x} wrote 0x{written:04x} at {address:?}, but read back 0x{read:04x}; state may have changed"
+    )]
+    KeycodeWriteMismatch {
+        command: u8,
+        address: [u8; 3],
+        written: u16,
+        read: u16,
+    },
+
+    #[error(
+        "wrote keymap value 0x{written:04x} at byte offset {offset}, but read back 0x{read:04x}; state may have changed"
+    )]
+    KeymapWriteMismatch {
+        offset: u16,
+        written: u16,
+        read: u16,
+    },
+
+    #[error("the keyboard reports an empty macro buffer")]
+    EmptyMacroBuffer,
+
+    #[error(
+        "VIA command 0x{command:02x} asked for {expected_size} macro bytes at offset {expected_offset}, reply echoes {actual_size} bytes at offset {actual_offset}"
+    )]
+    WrongMacroChunk {
+        command: u8,
+        expected_offset: u16,
+        actual_offset: u16,
+        expected_size: u8,
+        actual_size: u8,
+    },
+
+    #[error(
+        "a macro buffer write needs at least one byte and must end in 0, got {length} bytes; a non-zero last byte disables every macro"
+    )]
+    InvalidMacroBuffer { length: usize },
+
+    #[error(
+        "the keyboard's macro buffer holds {keyboard} bytes, but {buffer} bytes were given; nothing was written"
+    )]
+    MacroBufferSizeMismatch { keyboard: u16, buffer: usize },
+
+    #[error(
+        "wrote macro byte 0x{written:02x} at offset {offset}, but read back 0x{read:02x}; state may have changed"
+    )]
+    MacroWriteMismatch { offset: u16, written: u8, read: u8 },
 }
 
 impl<T: HidTransport> Via<T> {

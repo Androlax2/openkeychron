@@ -60,7 +60,13 @@ Recordings need the real keyboard, so they are `needs-hardware` issues for Theo.
 `read_timeout` event when no reply arrived. The command still exits with an error; a saved
 file does not mean detection succeeded. Failed writes and non-timeout I/O errors are not
 fixture events, so a disconnected device may leave only the earlier exchanges. If saving
-also fails, the error reports both failures. Other commands currently save only on success.
+also fails, the error reports both failures. `keymap show --record <file>` likewise saves
+completed exchanges when its read fails, and prints no success output until finalization
+passes. The backed-up keymap editing commands also finalize their sessions on failure.
+RGB and settings commands currently save only on success. `keymap set`, `keymap restore`
+and `keymap reset` reject `--record` and cannot create
+recording sessions, so recording finalization cannot overwrite their protected backups.
+All keymap-edit tests replay explicitly synthetic traffic, not hardware.
 
 For a separately approved receiver diagnostic, `info --reply-timeout-ms 5000` waits up to
 five seconds **per reply**, for both VIA and Keychron queries. The default stays 500 ms;
@@ -78,4 +84,6 @@ error immediately rather than waiting, and still checks that every event was con
 ## Layout
 
 - `fixtures/synthetic/`: hand-written fixtures that test the replay machinery itself.
+  Hand-written VIA definitions for the layout loader live there too, as
+  `via-definition-*.json` (`docs/protocol/via-definitions.md`).
 - `fixtures/<model>/`: real recordings, for example `fixtures/v5-max/detect.toml`.
