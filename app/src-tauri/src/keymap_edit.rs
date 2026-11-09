@@ -1,17 +1,17 @@
-//! The keymap writes the UI makes: set one key, undo the last change, redo what an undo took back,
-//! and restore the keymap from before the first change. Each goes through
-//! `openkeychron_guard::keymap`, which refuses a receiver or an unverified model, has this module
-//! keep the keymap it replaces in memory before it sends anything, and reads the whole keymap
-//! back. This module only decides which backup to
-//! keep and which one to write back.
+//! The keymap writes the UI makes: set one key or what one turn of an encoder sends, undo the
+//! last change, redo what an undo took back, and restore the keymap from before the first
+//! change. Each goes through `openkeychron_guard::keymap`, which refuses a receiver or an
+//! unverified model, has this module keep the keymap it replaces in memory before it sends
+//! anything, and reads the whole keymap back. This module only decides which backup to keep and
+//! which one to write back.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use openkeychron_guard::keymap::{self as guarded_keymap, KeyPosition, KeymapBackup};
+use openkeychron_guard::keymap::{self as guarded_keymap, EncoderTurn, KeyPosition, KeymapBackup};
 use openkeychron_guard::{GuardError, GuardedWriteError, require_write_verified};
 use openkeychron_hid::{HidTransport, KeychronDevice};
-use openkeychron_via::Via;
+use openkeychron_via::{EncoderDirection, Via};
 use serde::{Deserialize, Serialize};
 
 use crate::error::CommandError;
@@ -44,6 +44,35 @@ pub struct KeyAssignment {
     pub row: u8,
     pub column: u8,
     pub keycode: u16,
+}
+
+/// What one turn of an encoder sends on `layer`: the encoder's index, as `Key.encoder` names it,
+/// the direction, and the keycode it gets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct EncoderAssignment {
+    pub layer: u8,
+    pub encoder: u8,
+    pub direction: TurnDirection,
+    pub keycode: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub enum TurnDirection {
+    Clockwise,
+    CounterClockwise,
+}
+
+impl From<TurnDirection> for EncoderDirection {
+    fn from(direction: TurnDirection) -> Self {
+        match direction {
+            TurnDirection::Clockwise => Self::Clockwise,
+            TurnDirection::CounterClockwise => Self::CounterClockwise,
+        }
+    }
 }
 
 /// Every keymap the app replaced on one device, kept in memory until the app quits or another
@@ -170,15 +199,42 @@ pub fn set_keycode<T: HidTransport>(
         key,
         assignment.keycode,
         |previous| {
-            history.first_backup.get_or_insert_with(|| previous.clone());
-            history.undo.push(previous.clone());
-            history.undone.clear();
+            keep_before_a_change(history, previous);
             Ok(())
         },
     );
     history.note(
         outcome,
         |previous| with_assignment(previous, assignment),
+        "Undo puts back the keymap from before this change",
+    )?;
+    read(via.into_transport(), device, history)
+}
+
+/// Sets what one turn of an encoder sends, then returns the keymap read again after the write.
+pub fn set_encoder_keycode<T: HidTransport>(
+    transport: T,
+    device: &KeychronDevice,
+    history: &mut KeymapHistory,
+    assignment: EncoderAssignment,
+) -> Result<EditableKeymap, CommandError> {
+    let verified = require_write_verified(WRITES, device)?;
+    let turn = EncoderTurn::new(assignment.encoder, assignment.direction.into())?;
+    let mut via = Via::new(transport);
+    let outcome = guarded_keymap::set_encoder_keycode::<_, GuardError>(
+        &mut via,
+        &verified,
+        assignment.layer,
+        turn,
+        assignment.keycode,
+        |previous| {
+            keep_before_a_change(history, previous);
+            Ok(())
+        },
+    );
+    history.note(
+        outcome,
+        |previous| with_encoder_assignment(previous, assignment),
         "Undo puts back the keymap from before this change",
     )?;
     read(via.into_transport(), device, history)
@@ -261,6 +317,14 @@ pub fn restore_backup<T: HidTransport>(
     read(via.into_transport(), device, history)
 }
 
+/// Keeps the keymap a new change replaces: the first one is what Restore backup writes back, and
+/// each is a step Undo takes back.
+fn keep_before_a_change(history: &mut KeymapHistory, previous: &KeymapBackup) {
+    history.first_backup.get_or_insert_with(|| previous.clone());
+    history.undo.push(previous.clone());
+    history.undone.clear();
+}
+
 /// Keeps the keymap an undo or a redo replaces as a step the other one can write back, unless the
 /// step would put back nothing: the keyboard already holds `wanted`, or the newest step already
 /// holds `replaced`. Both happen when a write failed before it changed anything and is tried
@@ -284,6 +348,19 @@ fn with_assignment(previous: &KeymapBackup, assignment: KeyAssignment) -> Keymap
     expected
 }
 
+/// The keymap `guarded_keymap::set_encoder_keycode` requires the keyboard to read back:
+/// `previous` with the one turn changed. The guard checked the layer and the encoder before
+/// writing, and the supported layout's only encoder is the one a backup holds per layer.
+fn with_encoder_assignment(previous: &KeymapBackup, assignment: EncoderAssignment) -> KeymapBackup {
+    let mut expected = previous.clone();
+    let pair = &mut expected.encoders[usize::from(assignment.layer)];
+    match assignment.direction {
+        TurnDirection::Clockwise => pair.clockwise = assignment.keycode,
+        TurnDirection::CounterClockwise => pair.counter_clockwise = assignment.keycode,
+    }
+    expected
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -293,8 +370,8 @@ mod tests {
     use openkeychron_mock::{MockKeyboard, MockTransport};
 
     use super::{
-        EditableKeymap, KeyAssignment, KeymapHistories, KeymapHistory, read, redo, restore_backup,
-        set_keycode, undo,
+        EditableKeymap, EncoderAssignment, KeyAssignment, KeymapHistories, KeymapHistory,
+        TurnDirection, read, redo, restore_backup, set_encoder_keycode, set_keycode, undo,
     };
     use crate::error::CommandError;
     use crate::source::Connection;
@@ -307,6 +384,8 @@ mod tests {
     const KC_A: u16 = 0x0004;
     const KC_B: u16 = 0x0005;
     const KC_C: u16 = 0x0006;
+    const KC_VOLU: u16 = 0x00a9;
+    const KC_VOLD: u16 = 0x00aa;
 
     struct Mock {
         keyboard: MockKeyboard,
@@ -336,6 +415,16 @@ mod tests {
             .unwrap()
         }
 
+        fn turn(&mut self, layer: u8, direction: TurnDirection, keycode: u16) -> EditableKeymap {
+            set_encoder_keycode(
+                self.keyboard.connect(),
+                &self.device,
+                &mut self.history,
+                turn_assignment(layer, direction, keycode),
+            )
+            .unwrap()
+        }
+
         fn undo(&mut self) -> EditableKeymap {
             undo(self.keyboard.connect(), &self.device, &mut self.history).unwrap()
         }
@@ -360,6 +449,21 @@ mod tests {
             column: COLUMN,
             keycode,
         }
+    }
+
+    fn turn_assignment(layer: u8, direction: TurnDirection, keycode: u16) -> EncoderAssignment {
+        EncoderAssignment {
+            layer,
+            encoder: 0,
+            direction,
+            keycode,
+        }
+    }
+
+    /// What the knob sends turned counter-clockwise and clockwise on `layer`.
+    fn knob_at(keymap: &EditableKeymap, layer: usize) -> (u16, u16) {
+        let knob = &keymap.keymap.layers[layer].encoders[0];
+        (knob.counter_clockwise.keycode, knob.clockwise.keycode)
     }
 
     fn keycode_at(keymap: &EditableKeymap, layer: usize) -> u16 {
@@ -870,6 +974,140 @@ mod tests {
         assert_eq!(mock.undo().keymap, before);
     }
 
+    #[test]
+    fn returns_the_keymap_read_back_after_setting_a_knob_turn() {
+        let mut mock = Mock::new();
+        let edited = mock.turn(1, TurnDirection::Clockwise, KC_VOLU);
+        assert_eq!(knob_at(&edited, 1), (0, KC_VOLU));
+        assert_eq!(edited.keymap, mock.read().keymap);
+    }
+
+    #[test]
+    fn sets_the_counter_clockwise_turn_alone() {
+        let mut mock = Mock::new();
+        let edited = mock.turn(0, TurnDirection::CounterClockwise, KC_VOLD);
+        assert_eq!(knob_at(&edited, 0), (KC_VOLD, 0));
+    }
+
+    #[test]
+    fn a_knob_change_offers_one_undo_step_and_the_backup() {
+        let mut mock = Mock::new();
+        let edited = mock.turn(0, TurnDirection::Clockwise, KC_VOLU);
+        assert_eq!((edited.undo_steps, edited.can_restore_backup), (1, true));
+    }
+
+    #[test]
+    fn undo_puts_back_the_knob_turn_from_before_the_change() {
+        let mut mock = Mock::new();
+        mock.turn(0, TurnDirection::Clockwise, KC_VOLU);
+        mock.turn(0, TurnDirection::Clockwise, KC_VOLD);
+        let undone = mock.undo();
+        assert_eq!((knob_at(&undone, 0), undone.undo_steps), ((0, KC_VOLU), 1));
+    }
+
+    #[test]
+    fn undoing_a_knob_change_leaves_an_earlier_key_change() {
+        let mut mock = Mock::new();
+        mock.set(0, KC_A);
+        mock.turn(0, TurnDirection::Clockwise, KC_VOLU);
+        let undone = mock.undo();
+        assert_eq!(
+            (keycode_at(&undone, 0), knob_at(&undone, 0)),
+            (KC_A, (0, 0))
+        );
+    }
+
+    #[test]
+    fn redo_puts_back_the_knob_turn_the_last_undo_took_back() {
+        let mut mock = Mock::new();
+        mock.turn(2, TurnDirection::CounterClockwise, KC_VOLD);
+        mock.undo();
+        let redone = mock.redo();
+        assert_eq!(
+            (knob_at(&redone, 2), redone.undo_steps, redone.redo_steps),
+            ((KC_VOLD, 0), 1, 0)
+        );
+    }
+
+    #[test]
+    fn restore_backup_puts_back_the_knob_from_before_the_first_change() {
+        let mut mock = Mock::new();
+        // A non-zero turn, so a restore that wrote the zero seed back would not pass.
+        mock.turn(0, TurnDirection::Clockwise, KC_VOLD);
+        mock.history = KeymapHistory::default();
+        let first = mock.read().keymap;
+        mock.turn(0, TurnDirection::Clockwise, KC_VOLU);
+        mock.set(1, KC_C);
+        assert_eq!(mock.restore_backup().keymap, first);
+    }
+
+    #[test]
+    fn refuses_an_encoder_the_layout_does_not_have() {
+        let mut mock = Mock::new();
+        let error = set_encoder_keycode(
+            mock.keyboard.connect(),
+            &mock.device,
+            &mut mock.history,
+            EncoderAssignment {
+                encoder: 1,
+                ..turn_assignment(0, TurnDirection::Clockwise, KC_VOLU)
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "no encoder 1 in the supported V5 Max ISO layout"
+        );
+    }
+
+    #[test]
+    fn refuses_a_knob_turn_on_a_layer_the_keyboard_does_not_have() {
+        let mut mock = Mock::new();
+        let error = set_encoder_keycode(
+            mock.keyboard.connect(),
+            &mock.device,
+            &mut mock.history,
+            turn_assignment(4, TurnDirection::Clockwise, KC_VOLU),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "layer 4 is unavailable; select 0..=3");
+    }
+
+    /// QMK's `quantum/via.h`: `id_dynamic_keymap_set_encoder = 0x15`.
+    const SET_ENCODER_REQUEST: u8 = 0x15;
+
+    fn set_knob_while_unplugged(mock: &mut Mock) -> CommandError {
+        set_encoder_keycode(
+            FailingRequest {
+                request: SET_ENCODER_REQUEST,
+                transport: mock.keyboard.connect(),
+            },
+            &mock.device,
+            &mut mock.history,
+            turn_assignment(0, TurnDirection::Clockwise, KC_VOLU),
+        )
+        .unwrap_err()
+    }
+
+    #[test]
+    fn a_knob_write_that_fails_after_the_backup_says_undo_puts_it_back() {
+        let error = set_knob_while_unplugged(&mut Mock::new());
+        assert_eq!(
+            error.to_string(),
+            "device I/O failed: unplugged; the keyboard may have changed: Undo puts back the \
+             keymap from before this change while the keyboard stays plugged in; the app starts \
+             a new history once it is plugged in again"
+        );
+    }
+
+    #[test]
+    fn a_knob_write_that_fails_after_the_backup_leaves_it_to_undo() {
+        let mut mock = Mock::new();
+        let before = mock.read().keymap;
+        set_knob_while_unplugged(&mut mock);
+        assert_eq!(mock.undo().keymap, before);
+    }
+
     const PATH: &str = "/dev/hidraw5";
     const FIRST_PLUG_IN: &str = "0003:3434:0951.0007";
     const NEXT_PLUG_IN: &str = "0003:3434:0951.0008";
@@ -967,8 +1205,16 @@ mod tests {
             &KeychronDevice,
             &mut KeymapHistory,
         ) -> Result<EditableKeymap, CommandError>;
-        let writes: [Write; 4] = [
+        let writes: [Write; 5] = [
             |transport, device, history| set_keycode(transport, device, history, assignment(0, 4)),
+            |transport, device, history| {
+                set_encoder_keycode(
+                    transport,
+                    device,
+                    history,
+                    turn_assignment(0, TurnDirection::Clockwise, 4),
+                )
+            },
             |transport, device, history| undo(transport, device, history),
             |transport, device, history| redo(transport, device, history),
             |transport, device, history| restore_backup(transport, device, history),

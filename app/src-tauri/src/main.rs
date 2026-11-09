@@ -40,6 +40,7 @@ fn main() -> ExitCode {
             commands::read_macros,
             commands::read_settings,
             commands::set_keycode,
+            commands::set_encoder_keycode,
             commands::undo_keymap_change,
             commands::redo_keymap_change,
             commands::restore_keymap_backup,

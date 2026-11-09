@@ -53,6 +53,9 @@ pub enum GuardError {
     #[error("no physical key at ({row}, {column}) in the supported V5 Max ISO layout")]
     NoPhysicalKey { row: u8, column: u8 },
 
+    #[error("no encoder {encoder} in the supported V5 Max ISO layout")]
+    NoEncoder { encoder: u8 },
+
     #[error("layer {layer} is unavailable; select 0..={last_layer}")]
     LayerUnavailable { layer: u8, last_layer: u8 },
 

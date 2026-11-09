@@ -117,6 +117,24 @@ impl KeyPosition {
     }
 }
 
+/// One turning direction of an encoder in the supported V5 Max ISO layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EncoderTurn {
+    encoder: u8,
+    direction: EncoderDirection,
+}
+
+impl EncoderTurn {
+    pub fn new(encoder: u8, direction: EncoderDirection) -> Result<Self, GuardError> {
+        // `capture` reads, and a backup holds, encoder 0 alone: the pinned V5 Max ISO definition's
+        // only encoder. A write to any other would fail its read-back only after it was sent.
+        if encoder != 0 {
+            return Err(GuardError::NoEncoder { encoder });
+        }
+        Ok(Self { encoder, direction })
+    }
+}
+
 /// Sets one key on `layer` to `keycode`, then requires the whole keymap to read back as the
 /// backup with that one change. Returns the keymap from before the change.
 pub fn set_keycode<T, E>(
@@ -134,17 +152,7 @@ where
     write_via(
         via,
         verified,
-        |reader| {
-            let previous = capture(reader, verified.device(), None)?;
-            if layer >= previous.layer_count {
-                return Err(GuardError::LayerUnavailable {
-                    layer,
-                    last_layer: previous.layer_count - 1,
-                }
-                .into());
-            }
-            Ok((previous, ()))
-        },
+        |reader| Ok((capture_with_layer(reader, verified.device(), layer)?, ())),
         keep,
         |via, previous, ()| {
             let mut expected = previous.clone();
@@ -157,6 +165,57 @@ where
             Ok(verify(via, verified.device(), &expected)?)
         },
     )
+}
+
+/// Sets what turning `turn`'s encoder on `layer` sends to `keycode`, then requires the whole
+/// keymap to read back as the backup with that one change. Returns the keymap from before the
+/// change.
+pub fn set_encoder_keycode<T, E>(
+    via: &mut Via<T>,
+    verified: &WriteVerified,
+    layer: u8,
+    turn: EncoderTurn,
+    keycode: u16,
+    keep: impl FnOnce(&KeymapBackup) -> Result<(), E>,
+) -> Result<KeymapBackup, GuardedWriteError<KeymapBackup, E>>
+where
+    T: HidTransport,
+    E: From<GuardError>,
+{
+    write_via(
+        via,
+        verified,
+        |reader| Ok((capture_with_layer(reader, verified.device(), layer)?, ())),
+        keep,
+        |via, previous, ()| {
+            let mut expected = previous.clone();
+            let pair = &mut expected.encoders[usize::from(layer)];
+            match turn.direction {
+                EncoderDirection::Clockwise => pair.clockwise = keycode,
+                EncoderDirection::CounterClockwise => pair.counter_clockwise = keycode,
+            }
+            via.write_encoder_keycode(layer, turn.encoder, turn.direction, Keycode::from(keycode))
+                .map_err(GuardError::from)?;
+            Ok(verify(via, verified.device(), &expected)?)
+        },
+    )
+}
+
+/// Reads the keymap a write to one key on `layer` replaces, refusing a layer the keyboard does
+/// not have before anything is kept or written.
+fn capture_with_layer<T: HidTransport>(
+    reader: &mut ViaReader<'_, T>,
+    device: &KeychronDevice,
+    layer: u8,
+) -> Result<KeymapBackup, GuardError> {
+    let previous = capture(reader, device, None)?;
+    if layer >= previous.layer_count {
+        return Err(GuardError::LayerUnavailable {
+            layer,
+            last_layer: previous.layer_count - 1,
+        });
+    }
+    Ok(previous)
 }
 
 /// Writes `wanted`'s matrix and encoder keys, then requires the keymap to read back as `wanted`.

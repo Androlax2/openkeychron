@@ -1,5 +1,5 @@
 // Test data only.
-import type { Bounds, EditableKeymap, Key, Keymap } from "../lib/bindings";
+import type { Bounds, EditableKeymap, Encoder, Key, Keymap } from "../lib/bindings";
 
 // A hand-written, cut-down V5 Max FR ISO keymap: two rows of real positions, the ISO Enter,
 // the 1u Num Lock and two unused matrix slots. Bounds come from the V5 Max ISO layout in openkeychron-via.
@@ -27,6 +27,7 @@ function physicalKey(
     secondaryBounds,
     keycode,
     name,
+    encoder: null,
   });
 }
 
@@ -43,6 +44,7 @@ const unusedSlot =
     secondaryBounds: null,
     keycode,
     name,
+    encoder: null,
   });
 
 const NO: Assignment = [0x0000, "NO"];
@@ -94,6 +96,15 @@ const FUNCTION_LAYER: Assignment[] = [
   NO,
 ];
 
+/** The V5 Max's one encoder, which the cut-down layout has no key for. */
+function knob(counterClockwise: Assignment, clockwise: Assignment): Encoder {
+  return {
+    index: 0,
+    counterClockwise: { keycode: counterClockwise[0], name: counterClockwise[1] },
+    clockwise: { keycode: clockwise[0], name: clockwise[1] },
+  };
+}
+
 function assign(assignments: Assignment[]): Key[] {
   return KEYS.map((makeKey, slot) => {
     const assignment = assignments[slot];
@@ -109,8 +120,8 @@ export const KEYMAP: Keymap = {
   rows: 2,
   columns: COLUMNS,
   layers: [
-    { index: 0, keys: assign(FRENCH_TYPING) },
-    { index: 1, keys: assign(FUNCTION_LAYER) },
+    { index: 0, keys: assign(FRENCH_TYPING), encoders: [knob([0x00aa, "VOLD"], [0x00a9, "VOLU"])] },
+    { index: 1, keys: assign(FUNCTION_LAYER), encoders: [knob(TRNS, TRNS)] },
   ],
 };
 
@@ -121,6 +132,26 @@ export const EDITABLE_KEYMAP: EditableKeymap = {
   redoSteps: 0,
   canRestoreBackup: false,
 };
+
+/**
+ * KEYMAP with Num Lock's slot made the press of encoder 0: the cut-down layout has no room for
+ * the V5 Max's knob at row 0, column 18.
+ */
+export const KNOB = { layer: 0, row: 0, column: 4 };
+
+export const KNOB_KEYMAP: Keymap = {
+  ...KEYMAP,
+  layers: KEYMAP.layers.map((layer) => ({
+    ...layer,
+    keys: layer.keys.map((key) =>
+      key.row === KNOB.row && key.column === KNOB.column
+        ? { ...key, legend: "Knob", encoder: 0 }
+        : key,
+    ),
+  })),
+};
+
+export const EDITABLE_KNOB: EditableKeymap = { ...EDITABLE_KEYMAP, keymap: KNOB_KEYMAP };
 
 /** `keymap` with the key at `row`, `column` on layer `layer` given `keycode` and `name`. */
 export function withKeycode(

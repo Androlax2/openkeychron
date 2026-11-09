@@ -507,7 +507,7 @@ mod tests {
     #[test]
     fn a_fixture_device_answers_a_read_command_from_its_fixture() {
         let directory =
-            FixtureDirectory::new("read").with_synthetic("keymap.toml", "cli-keymap.toml");
+            FixtureDirectory::new("read").with_synthetic("keymap.toml", "app-keymap.toml");
         let source = DeviceSource::fixtures(directory.path()).unwrap();
         let (device, transport) = source.open(&directory.device_path("keymap.toml")).unwrap();
         let keymap = keymap::read(transport, &device).unwrap();
@@ -517,7 +517,7 @@ mod tests {
     #[test]
     fn every_command_replays_the_fixture_from_its_start() {
         let directory =
-            FixtureDirectory::new("again").with_synthetic("keymap.toml", "cli-keymap.toml");
+            FixtureDirectory::new("again").with_synthetic("keymap.toml", "app-keymap.toml");
         let source = DeviceSource::fixtures(directory.path()).unwrap();
         let path = directory.device_path("keymap.toml");
         for _ in 0..2 {

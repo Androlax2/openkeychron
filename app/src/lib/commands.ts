@@ -5,6 +5,7 @@ import type {
   Device,
   DeviceInfo,
   EditableKeymap,
+  EncoderAssignment,
   KeyAssignment,
   MacroList,
   Settings,
@@ -19,12 +20,18 @@ export const readInfo = (path: string): Promise<DeviceInfo> => invoke("read_info
 export const readKeymap = (path: string): Promise<EditableKeymap> =>
   invoke("read_keymap", { path });
 
-// The four keymap writes. Each goes through the guarded write path: refused for a receiver or
+// The five keymap writes. Each goes through the guarded write path: refused for a receiver or
 // an unverified model, the keymap it replaces kept in memory first, the whole keymap read back.
 // Each resolves with the keymap read again after the write.
 
 export const setKeycode = (path: string, assignment: KeyAssignment): Promise<EditableKeymap> =>
   invoke("set_keycode", { path, assignment });
+
+/** Sets what one turn of an encoder sends. */
+export const setEncoderKeycode = (
+  path: string,
+  assignment: EncoderAssignment,
+): Promise<EditableKeymap> => invoke("set_encoder_keycode", { path, assignment });
 
 /** Takes back the newest keymap change the app made on the device. */
 export const undoKeymapChange = (path: string): Promise<EditableKeymap> =>
