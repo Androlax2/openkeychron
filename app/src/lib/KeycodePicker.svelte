@@ -1,12 +1,17 @@
 <script lang="ts">
-import { KEYCODE_CATEGORIES } from "./bindings";
+import type { KeycodeCategory } from "./bindings";
 import { matchingCategories } from "./keycode-search";
 
 let {
+  categories,
+  label = "Search keycodes",
   layerCount,
   chosen,
   onchoose,
 }: {
+  categories: readonly KeycodeCategory[];
+  /** The search field's label. */
+  label?: string;
   /** The keyboard's layer count: layer keycodes are offered for these layers only. */
   layerCount: number;
   chosen: number | null;
@@ -16,14 +21,14 @@ let {
 const id = $props.id();
 let search = $state("");
 
-const shownCategories = $derived(matchingCategories(KEYCODE_CATEGORIES, search, layerCount));
+const shownCategories = $derived(matchingCategories(categories, search, layerCount));
 const matchCount = $derived(
   shownCategories.reduce((count, category) => count + category.keycodes.length, 0),
 );
 </script>
 
 <div class="keycode-picker">
-  <label for="{id}-search">Search keycodes</label>
+  <label for="{id}-search">{label}</label>
   <input id="{id}-search" type="search" autocomplete="off" spellcheck="false" bind:value={search}>
 
   <p class="match-count" aria-live="polite">

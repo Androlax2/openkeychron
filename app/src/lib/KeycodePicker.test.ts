@@ -1,5 +1,6 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, describe, expect, it } from "vitest";
+import { KEYCODE_CATEGORIES } from "./bindings";
 import KeycodePicker from "./KeycodePicker.svelte";
 
 let mounted: Record<string, unknown> | null = null;
@@ -18,7 +19,10 @@ function render(
 ): HTMLElement {
   const target = document.createElement("div");
   document.body.append(target);
-  mounted = mount(KeycodePicker, { target, props: { layerCount: 4, chosen, onchoose } });
+  mounted = mount(KeycodePicker, {
+    target,
+    props: { categories: KEYCODE_CATEGORIES, layerCount: 4, chosen, onchoose },
+  });
   flushSync();
   return target;
 }
