@@ -14,7 +14,7 @@ mod tests {
 
     fn v5_max_iso() -> MockKeyboard {
         MockKeyboard::new(DeviceIdentity {
-            name: "mock V5 Max ISO".to_owned(),
+            name: Some("mock V5 Max ISO".to_owned()),
             vendor_id: 0x3434,
             product_id: 0x0951,
             usage_page: 0xff60,

@@ -117,7 +117,7 @@ pub fn fixture_device(
     path: &Path,
 ) -> Result<KeychronDevice, NotKeychronVia> {
     let interface = HidInterface {
-        name: Some(identity.name.clone()),
+        name: identity.name.clone(),
         vendor_id: identity.vendor_id,
         product_id: identity.product_id,
         usage_page: identity.usage_page,
@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn trims_the_product_name_of_a_fixture_device() {
         let identity = DeviceIdentity {
-            name: "Keychron Link ".to_owned(),
+            name: Some("Keychron Link ".to_owned()),
             ..identity(0x3434, 0xff60, 0x61)
         };
         let device = fixture_device(&identity, Path::new("link.toml")).unwrap();
@@ -362,7 +362,7 @@ mod tests {
 
     fn identity(vendor_id: u16, usage_page: u16, usage: u16) -> DeviceIdentity {
         DeviceIdentity {
-            name: "Keychron V5 Max".to_owned(),
+            name: Some("Keychron V5 Max".to_owned()),
             vendor_id,
             product_id: 0x0951,
             usage_page,

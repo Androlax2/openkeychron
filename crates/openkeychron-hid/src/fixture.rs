@@ -23,7 +23,10 @@ pub struct Fixture {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DeviceIdentity {
-    pub name: String,
+    /// `None` when the device reported no product name. Absent from the file then, so
+    /// fixtures written before this was optional parse unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub vendor_id: u16,
     pub product_id: u16,
     pub usage_page: u16,
@@ -138,7 +141,7 @@ mod tests {
 
     fn keychron_link() -> DeviceIdentity {
         DeviceIdentity {
-            name: "Keychron Link".to_owned(),
+            name: Some("Keychron Link".to_owned()),
             vendor_id: 0x3434,
             product_id: 0xd030,
             usage_page: 0xff60,
@@ -167,6 +170,23 @@ data = "01 00 0c"
 [[event]]
 kind = "read_timeout"
 "#;
+
+    #[test]
+    fn a_fixture_without_a_device_name_parses_as_nameless() {
+        let text = VALID.replace("name = \"Keychron Link\"\n", "");
+        let fixture = Fixture::from_toml(&text).unwrap();
+        assert_eq!(fixture.device.name, None);
+    }
+
+    #[test]
+    fn a_nameless_device_is_saved_without_a_name_key() {
+        let device = DeviceIdentity {
+            name: None,
+            ..keychron_link()
+        };
+        let text = Fixture::new(device, vec![]).to_toml().unwrap();
+        assert!(!text.contains("name ="), "{text}");
+    }
 
     #[test]
     fn parses_a_hand_written_fixture() {

@@ -16,7 +16,7 @@ mod tests {
     fn replay(events: Vec<Event>) -> Via<ReplayTransport> {
         Via::new(ReplayTransport::new(Fixture::new(
             DeviceIdentity {
-                name: "synthetic cable keyboard".to_owned(),
+                name: Some("synthetic cable keyboard".to_owned()),
                 vendor_id: 0x3434,
                 product_id: 0x0951,
                 usage_page: 0xff60,

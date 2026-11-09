@@ -23,7 +23,7 @@ pub fn replay(name: &str) -> Replay {
 pub fn replay_fixture(fixture: Fixture) -> Replay {
     let identity = &fixture.device;
     let interface = HidInterface {
-        name: Some(identity.name.clone()),
+        name: identity.name.clone(),
         vendor_id: identity.vendor_id,
         product_id: identity.product_id,
         usage_page: identity.usage_page,

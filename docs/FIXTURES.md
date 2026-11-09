@@ -30,6 +30,10 @@ data = "01 00 0c ..."
 kind = "read_timeout"   # the host waited and nothing arrived
 ```
 
+- `name` is optional. A device that reports no product name, or a blank one, is recorded
+  without a `name` key, and replaying it lists `name = None`. Fixtures with a `name` parse
+  unchanged, so this addition does not bump `format_version`. A build older than this change
+  rejects a fixture without `name`.
 - `data` is the report as the protocol sees it, without the leading report ID byte that
   some HID APIs need.
 - Events replay in order. `ReplayTransport` fails on the first write whose bytes differ,
