@@ -7,7 +7,10 @@ mod commands;
 mod device;
 mod error;
 mod info;
+#[cfg(test)]
+mod keycode_catalog;
 mod keymap;
+mod keymap_edit;
 mod macros;
 mod settings;
 mod source;
@@ -29,12 +32,17 @@ fn main() -> ExitCode {
     let app = tauri::Builder::default()
         .manage(commands::DeviceAccess::default())
         .manage(source)
+        .manage(keymap_edit::KeymapHistories::default())
         .invoke_handler(tauri::generate_handler![
             commands::list_devices,
             commands::read_info,
             commands::read_keymap,
             commands::read_macros,
             commands::read_settings,
+            commands::set_keycode,
+            commands::undo_keymap_change,
+            commands::redo_keymap_change,
+            commands::restore_keymap_backup,
         ])
         .run(tauri::generate_context!());
     match app {

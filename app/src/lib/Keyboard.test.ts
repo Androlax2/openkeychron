@@ -1,15 +1,18 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, describe, expect, it } from "vitest";
-import { KEYMAP } from "../test/synthetic-keymap";
+import { KEYMAP, withKeycode } from "../test/synthetic-keymap";
 import type { Keymap } from "./bindings";
-import Keyboard, { KEY_UNIT } from "./Keyboard.svelte";
+import Keyboard, { KEY_UNIT, type KeySelection } from "./Keyboard.svelte";
 
 let mounted: Record<string, unknown> | null = null;
 
-function render(keymap: Keymap = KEYMAP): HTMLElement {
+function render(
+  keymap: Keymap = KEYMAP,
+  onselectionchange: (selection: KeySelection) => void = () => {},
+): HTMLElement {
   const target = document.createElement("div");
   document.body.append(target);
-  mounted = mount(Keyboard, { target, props: { keymap } });
+  mounted = mount(Keyboard, { target, props: { keymap, onselectionchange } });
   flushSync();
   return target;
 }
@@ -236,6 +239,32 @@ describe("Keyboard", () => {
     expect(keycode?.style.fontSize).toBe(`${(9 * 40) / 60}px`);
   });
 
+  describe("a 26-character name on a 1u key", () => {
+    const MOD_TAP_NAME = "MT(MOD_LCTL | MOD_LGUI, A)";
+    const withLongName = (name: string) =>
+      withKeycode(KEYMAP, { layer: 0, row: 1, column: 0 }, 0x2304, name);
+
+    it("is cut with an ellipsis at a readable size", () => {
+      const view = render(withLongName(MOD_TAP_NAME));
+      const keycode = keyNamed(view, "A").querySelector<SVGTextElement>("text.keycode");
+      expect(keycode?.textContent?.trim().endsWith("…")).toBe(true);
+      expect(keycode?.style.fontSize).toBe("6px");
+    });
+
+    it("keeps the full name in the hover title and the accessible name", () => {
+      const view = render(withLongName(MOD_TAP_NAME));
+      const key = keyNamed(view, "A");
+      expect(key.querySelector("title")?.textContent).toBe(`${MOD_TAP_NAME} (0x2304)`);
+      expect(key.getAttribute("aria-label")).toContain(MOD_TAP_NAME);
+    });
+
+    it("is written as QMK's shorthand when QMK has one", () => {
+      const view = render(withLongName("LCTL(LSFT(LALT(LGUI(A))))"));
+      const keycode = keyNamed(view, "A").querySelector<SVGTextElement>("text.keycode");
+      expect(keycode?.textContent?.trim()).toBe("HYPR(A)");
+    });
+  });
+
   it("moves between layer tabs with the arrow keys", () => {
     const view = render();
     const [firstLayer] = layerTabs(view);
@@ -257,5 +286,35 @@ describe("Keyboard", () => {
     }
     click(secondLayer);
     expect(selectedLegends(view)).toEqual(["Z"]);
+  });
+
+  it("reports the selected key with the index of the layer it is shown on", () => {
+    const selections: KeySelection[] = [];
+    const view = render(KEYMAP, (selection) => selections.push(selection));
+    click(keyNamed(view, "Z"));
+    expect(selections).toEqual([{ layer: 0, row: 1, column: 1 }]);
+  });
+
+  it("reports the selected key again on the layer the user switches to", () => {
+    const selections: KeySelection[] = [];
+    const view = render(KEYMAP, (selection) => selections.push(selection));
+    click(keyNamed(view, "Z"));
+    const [, secondLayer] = layerTabs(view);
+    if (secondLayer === undefined) {
+      throw new Error("no second layer tab");
+    }
+    click(secondLayer);
+    expect(selections.at(-1)).toEqual({ layer: 1, row: 1, column: 1 });
+  });
+
+  it("reports no selection when the layer changes before a key is selected", () => {
+    const selections: KeySelection[] = [];
+    const view = render(KEYMAP, (selection) => selections.push(selection));
+    const [, secondLayer] = layerTabs(view);
+    if (secondLayer === undefined) {
+      throw new Error("no second layer tab");
+    }
+    click(secondLayer);
+    expect(selections).toEqual([]);
   });
 });

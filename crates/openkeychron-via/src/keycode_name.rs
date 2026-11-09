@@ -9,7 +9,9 @@
 //! Keychron's custom keycodes from `QK_KB_0` (0x7e00) depend on each model's firmware build,
 //! so only a registered model names them ([`crate::RegisteredModel::keycode_name`]).
 
-use crate::keycode::{Keycode, KeycodeKind, LayerAction};
+use crate::keycode::{
+    Keycode, KeycodeError, KeycodeKind, KeycodeWrapper, LayerAction, check_modifiers,
+};
 
 /// QMK's five-bit modifier field: bits 0 to 3 pick Ctrl, Shift, Alt and GUI, bit 4 makes
 /// them all right-hand ones.
@@ -28,34 +30,90 @@ impl Keycode {
         match self.kind() {
             KeycodeKind::Basic(key) => basic_name(key).map(str::to_owned),
             KeycodeKind::Modified { modifiers, key } => {
-                let key = basic_name(key)?;
-                let names = modifier_names(modifiers)?;
-                Some(names.iter().rev().fold(key.to_owned(), |inner, modifier| {
-                    format!("{modifier}({inner})")
-                }))
+                wrapped_name(KeycodeWrapper::Modified(modifiers), basic_name(key)?)
             }
             KeycodeKind::ModTap { modifiers, key } => {
-                let key = basic_name(key)?;
-                match modifier_names(modifiers)?.as_slice() {
-                    [modifier] => Some(format!("{modifier}_T({key})")),
-                    _ => Some(format!("MT({}, {key})", modifier_list(modifiers)?)),
-                }
+                wrapped_name(KeycodeWrapper::ModTap(modifiers), basic_name(key)?)
             }
             KeycodeKind::LayerTap { layer, key } => {
-                Some(format!("LT({layer}, {})", basic_name(key)?))
+                wrapped_name(KeycodeWrapper::LayerTap(layer), basic_name(key)?)
             }
-            KeycodeKind::LayerMod { layer, modifiers } => {
-                Some(format!("LM({layer}, {})", modifier_list(modifiers)?))
-            }
+            KeycodeKind::LayerMod { layer, modifiers } => wrapped_name(
+                KeycodeWrapper::LayerMod(layer),
+                &modifiers_name(modifiers).ok()?,
+            ),
             KeycodeKind::Layer { action, layer } => {
                 Some(format!("{}({layer})", layer_macro(action)))
             }
             KeycodeKind::OneShotModifiers(modifiers) => {
-                Some(format!("OSM({})", modifier_list(modifiers)?))
+                Some(format!("OSM({})", modifiers_name(modifiers).ok()?))
             }
             KeycodeKind::Raw(raw) => quantum_name(raw).map(str::to_owned),
         }
     }
+}
+
+/// The text QMK writes around the inner part of a two-part keycode: `LCTL(` and `)` around
+/// `C` in `LCTL(C)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WrapperName {
+    pub before: String,
+    pub after: String,
+}
+
+impl WrapperName {
+    #[must_use]
+    pub fn around(&self, inner: &str) -> String {
+        format!("{}{inner}{}", self.before, self.after)
+    }
+}
+
+impl KeycodeWrapper {
+    /// How QMK writes this wrapper around an inner part: a basic keycode's name, or for
+    /// [`Self::LayerMod`] a modifier field's [`modifiers_name`]. One modifier makes a mod-tap
+    /// `LCTL_T(…)`; several make it `MT(MOD_LCTL | MOD_LSFT, …)`.
+    ///
+    /// # Errors
+    ///
+    /// When the wrapper holds no modifier, or its layer is past 15.
+    pub fn name(self) -> Result<WrapperName, KeycodeError> {
+        // Refuses what `wrap` refuses, such as LT(16, …), which no name should suggest exists.
+        self.bits()?;
+        let (before, after) = match self {
+            Self::Modified(modifiers) => {
+                let names = modifier_names(modifiers);
+                (format!("{}(", names.join("(")), ")".repeat(names.len()))
+            }
+            Self::ModTap(modifiers) => match modifier_names(modifiers).as_slice() {
+                [modifier] => (format!("{modifier}_T("), ")".to_owned()),
+                _ => (
+                    format!("MT({}, ", modifiers_name(modifiers)?),
+                    ")".to_owned(),
+                ),
+            },
+            Self::LayerTap(layer) => (format!("LT({layer}, "), ")".to_owned()),
+            Self::LayerMod(layer) => (format!("LM({layer}, "), ")".to_owned()),
+        };
+        Ok(WrapperName { before, after })
+    }
+}
+
+fn wrapped_name(wrapper: KeycodeWrapper, inner: &str) -> Option<String> {
+    Some(wrapper.name().ok()?.around(inner))
+}
+
+/// A modifier field as `MT`, `LM` and `OSM` take it: `MOD_LCTL | MOD_LSFT`.
+///
+/// # Errors
+///
+/// When the field holds no modifier.
+pub fn modifiers_name(modifiers: u8) -> Result<String, KeycodeError> {
+    check_modifiers(modifiers)?;
+    Ok(modifier_names(modifiers)
+        .iter()
+        .map(|name| format!("MOD_{name}"))
+        .collect::<Vec<_>>()
+        .join(" | "))
 }
 
 const QK_KB_0: u16 = 0x7e00;
@@ -91,31 +149,18 @@ fn quantum_name(raw: u16) -> Option<&'static str> {
         .map(|(_, name)| *name)
 }
 
-/// `LCTL`, `RSFT`…, in QMK's bit order; `None` when no modifier bit is set.
-fn modifier_names(modifiers: u8) -> Option<Vec<String>> {
+/// `LCTL`, `RSFT`…, in QMK's bit order; empty when no modifier bit is set.
+fn modifier_names(modifiers: u8) -> Vec<String> {
     let hand = if modifiers & RIGHT_HAND == 0 {
         'L'
     } else {
         'R'
     };
-    let names: Vec<String> = MODIFIER_SUFFIXES
+    MODIFIER_SUFFIXES
         .iter()
         .filter(|(bit, _)| modifiers & bit != 0)
         .map(|(_, suffix)| format!("{hand}{suffix}"))
-        .collect();
-    (!names.is_empty()).then_some(names)
-}
-
-/// `MOD_LCTL | MOD_LSFT`, as `MT`, `LM` and `OSM` take it.
-fn modifier_list(modifiers: u8) -> Option<String> {
-    let names = modifier_names(modifiers)?;
-    Some(
-        names
-            .iter()
-            .map(|name| format!("MOD_{name}"))
-            .collect::<Vec<_>>()
-            .join(" | "),
-    )
+        .collect()
 }
 
 fn layer_macro(action: LayerAction) -> &'static str {

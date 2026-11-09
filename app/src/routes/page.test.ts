@@ -1,8 +1,8 @@
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Device, Keymap } from "../lib/bindings";
-import { KEYMAP } from "../test/synthetic-keymap";
+import type { Device, EditableKeymap } from "../lib/bindings";
+import { EDITABLE_KEYMAP, KEYMAP, withKeycode } from "../test/synthetic-keymap";
 import Page from "./+page.svelte";
 
 const KEYBOARD: Device = {
@@ -72,7 +72,7 @@ describe("the start page", () => {
       }
       if (command === "read_keymap") {
         keymapPaths.push((payload as { path: string }).path);
-        return KEYMAP;
+        return EDITABLE_KEYMAP;
       }
       throw new Error(`unexpected command ${command}`);
     });
@@ -112,18 +112,21 @@ describe("the start page", () => {
   });
 
   it("shows the last chosen device's keys when an earlier read answers late", async () => {
-    let answerFirstRead: (keymap: Keymap) => void = () => {};
-    const oneLayer: Keymap = { ...KEYMAP, layerCount: 1, layers: KEYMAP.layers.slice(0, 1) };
+    let answerFirstRead: (keymap: EditableKeymap) => void = () => {};
+    const oneLayer: EditableKeymap = {
+      ...EDITABLE_KEYMAP,
+      keymap: { ...KEYMAP, layerCount: 1, layers: KEYMAP.layers.slice(0, 1) },
+    };
     mockIPC((command, payload) => {
       if (command === "list_devices") {
         return [KEYBOARD, SECOND_KEYBOARD];
       }
       if ((payload as { path: string }).path === KEYBOARD.path) {
-        return new Promise<Keymap>((resolve) => {
+        return new Promise<EditableKeymap>((resolve) => {
           answerFirstRead = resolve;
         });
       }
-      return KEYMAP;
+      return EDITABLE_KEYMAP;
     });
     const view = render();
     await showKeysOf(view, KEYBOARD);
@@ -135,5 +138,104 @@ describe("the start page", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     flushSync();
     expect(view.querySelectorAll('[role="tab"]')).toHaveLength(2);
+  });
+
+  it("remaps the selected key and draws the keycode the keyboard read back", async () => {
+    const position = { layer: 0, row: 1, column: 1 };
+    const afterWrite: EditableKeymap = {
+      keymap: withKeycode(KEYMAP, position, 0x0029, "ESC"),
+      undoSteps: 1,
+      redoSteps: 0,
+      canRestoreBackup: true,
+    };
+    const writes: unknown[] = [];
+    mockIPC((command, payload) => {
+      if (command === "list_devices") {
+        return [KEYBOARD];
+      }
+      if (command === "read_keymap") {
+        return EDITABLE_KEYMAP;
+      }
+      if (command === "set_keycode") {
+        writes.push(payload);
+        return afterWrite;
+      }
+      throw new Error(`unexpected command ${command}`);
+    });
+    const view = render();
+    await showKeysOf(view);
+    const zKey = await vi.waitFor(() => {
+      const found = view.querySelector<SVGGElement>('[data-row="1"][data-column="1"]');
+      if (found === null) {
+        throw new Error("the keyboard is not drawn yet");
+      }
+      return found;
+    });
+    zKey.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    flushSync();
+    const escapeChoice = [...view.querySelectorAll("label.choice")]
+      .find((label) => label.textContent?.trim() === "ESC")
+      ?.querySelector<HTMLInputElement>("input");
+    escapeChoice?.click();
+    flushSync();
+    [...view.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Apply")
+      ?.click();
+    await vi.waitFor(() => {
+      expect(
+        view.querySelector('[data-row="1"][data-column="1"]')?.getAttribute("aria-label"),
+      ).toBe("Z, keycode ESC (0x0029)");
+    });
+    expect(writes).toEqual([{ path: KEYBOARD.path, assignment: { ...position, keycode: 0x0029 } }]);
+  });
+
+  /** Clicks the key at `row`, `column` once the keyboard is drawn. */
+  async function selectKey(view: HTMLElement, row: number, column: number): Promise<void> {
+    const key = await vi.waitFor(() => {
+      const found = view.querySelector<SVGGElement>(`[data-row="${row}"][data-column="${column}"]`);
+      if (found === null) {
+        throw new Error("the keyboard is not drawn yet");
+      }
+      return found;
+    });
+    key.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    flushSync();
+  }
+
+  function buttonNamed(view: HTMLElement, name: string): HTMLButtonElement | undefined {
+    return [...view.querySelectorAll("button")].find((button) =>
+      button.textContent?.trim().startsWith(name),
+    );
+  }
+
+  it("forgets the selected key when another device's keys are shown", async () => {
+    mockIPC((command) =>
+      command === "list_devices" ? [KEYBOARD, SECOND_KEYBOARD] : EDITABLE_KEYMAP,
+    );
+    const view = render();
+    await showKeysOf(view, KEYBOARD);
+    await selectKey(view, 1, 1);
+    await showKeysOf(view, SECOND_KEYBOARD);
+    await vi.waitFor(() => {
+      expect(view.querySelector(".selected-key")?.textContent?.trim()).toBe("No key selected.");
+    });
+  });
+
+  it("offers the undo the app kept for a device when its keys are shown again", async () => {
+    const histories: Record<string, EditableKeymap> = {
+      [KEYBOARD.path]: { ...EDITABLE_KEYMAP, undoSteps: 1, canRestoreBackup: true },
+      [SECOND_KEYBOARD.path]: EDITABLE_KEYMAP,
+    };
+    mockIPC((command, payload) =>
+      command === "list_devices"
+        ? [KEYBOARD, SECOND_KEYBOARD]
+        : histories[(payload as { path: string }).path],
+    );
+    const view = render();
+    await showKeysOf(view, SECOND_KEYBOARD);
+    await showKeysOf(view, KEYBOARD);
+    await vi.waitFor(() => {
+      expect(buttonNamed(view, "Undo")?.disabled).toBe(false);
+    });
   });
 });

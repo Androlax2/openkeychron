@@ -1,26 +1,33 @@
 <script lang="ts" module>
 /** Pixels per key unit: a standard 1u key is this wide in the SVG's coordinates. */
 export const KEY_UNIT = 60;
+
+/** A selected key on one layer: the layer's index and the key's matrix position. */
+export type KeySelection = { layer: number; row: number; column: number };
 </script>
 
 <script lang="ts">
 import type { Bounds, Key, Keymap } from "./bindings";
 import { arrowDirection, neighbour } from "./keyboard-navigation";
+import { fitKeycodeLabel, shortenKeycodeName } from "./keycode-label";
+import { describeKeycode, hex } from "./keycode-text";
 
 type PlacedKey = Key & { bounds: Bounds };
 type MatrixPosition = { row: number; column: number };
 
-let { keymap }: { keymap: Keymap } = $props();
+let {
+  keymap,
+  onselectionchange = () => {},
+}: {
+  keymap: Keymap;
+  /** Called when a key is selected, and again with the new layer when the layer changes. */
+  onselectionchange?: (selection: KeySelection) => void;
+} = $props();
 
 // The gap between neighbouring keycaps, taken off each side of a key's rectangle.
 const INSET = 3;
 // Where legends start inside a key: the same distance from the key's left and right edges.
 const LEGEND_MARGIN = 10;
-// The keycode label's size, as in the style block, and a generous width for one of its
-// characters, so a name estimated to fit does fit.
-const KEYCODE_FONT_SIZE = 9;
-const KEYCODE_CHARACTER_WIDTH = 6;
-
 const id = $props.id();
 let layerPosition = $state(0);
 let focused: MatrixPosition | null = $state(null);
@@ -69,29 +76,13 @@ function capRectangles(key: PlacedKey): Bounds[] {
   }));
 }
 
-function hex(keycode: number): string {
-  return `0x${keycode.toString(16).padStart(4, "0")}`;
-}
-
-/** QMK's name with the raw value, or only the raw value of a keycode without a name. */
-function describeKeycode(key: Key): string {
-  return key.name === null ? hex(key.keycode) : `${key.name} (${hex(key.keycode)})`;
-}
-
 /** The keycap shows the name, or the raw value of a custom or unknown keycode. */
 function keycodeLabel(key: Key): string {
-  return key.name ?? hex(key.keycode);
+  return key.name === null ? hex(key.keycode) : shortenKeycodeName(key.name);
 }
 
-/**
- * A smaller font size for a keycode label that would run past the keycap's edge, such as
- * "LT(1, SPC)" on a 1u key; null when it fits. Shrinking, unlike SVG's textLength, never
- * stretches a label the estimate made too wide.
- */
-function shrunkFontSize(key: PlacedKey): number | null {
-  const available = key.bounds.width * KEY_UNIT - 2 * LEGEND_MARGIN;
-  const estimated = keycodeLabel(key).length * KEYCODE_CHARACTER_WIDTH;
-  return estimated > available ? (KEYCODE_FONT_SIZE * available) / estimated : null;
+function fittedKeycodeLabel(key: PlacedKey) {
+  return fitKeycodeLabel(keycodeLabel(key), key.bounds.width * KEY_UNIT - 2 * LEGEND_MARGIN);
 }
 
 /** The base legend, or the matrix position for a layout that has no legends. */
@@ -121,6 +112,19 @@ function accessibleName(key: Key): string {
 
 function select(key: PlacedKey): void {
   selected = { row: key.row, column: key.column };
+  reportSelection();
+}
+
+function showLayer(position: number): void {
+  layerPosition = position;
+  reportSelection();
+}
+
+function reportSelection(): void {
+  const layer = keymap.layers[layerPosition];
+  if (selected !== null && layer !== undefined) {
+    onselectionchange({ layer: layer.index, ...selected });
+  }
 }
 
 function onKeyKeydown(event: KeyboardEvent, key: PlacedKey): void {
@@ -150,7 +154,7 @@ function onTabKeydown(event: KeyboardEvent): void {
   }
   event.preventDefault();
   const count = keymap.layers.length;
-  layerPosition = (layerPosition + step + count) % count;
+  showLayer((layerPosition + step + count) % count);
   document.getElementById(`${id}-tab-${layerPosition}`)?.focus();
 }
 </script>
@@ -165,9 +169,7 @@ function onTabKeydown(event: KeyboardEvent): void {
         aria-selected={position === layerPosition}
         aria-controls="{id}-panel"
         tabindex={position === layerPosition ? 0 : -1}
-        onclick={() => {
-          layerPosition = position;
-        }}
+        onclick={() => showLayer(position)}
         onkeydown={onTabKeydown}
       >
         Layer {layer.index}
@@ -188,7 +190,7 @@ function onTabKeydown(event: KeyboardEvent): void {
             {@const rectangles = capRectangles(key)}
             {@const isSelected = isAt(key, selected)}
             {@const lines = legendLines(key)}
-            {@const keycodeFontSize = shrunkFontSize(key)}
+            {@const keycodeLabelFit = fittedKeycodeLabel(key)}
             <g
               role="option"
               class="key"
@@ -205,6 +207,7 @@ function onTabKeydown(event: KeyboardEvent): void {
                 focused = { row: key.row, column: key.column };
               }}
             >
+              <title>{describeKeycode(key)}</title>
               <!-- Edges first, fills on top: two rectangles then read as one keycap outline. -->
               {#each rectangles as rectangle}
                 <rect class="cap-edge" {...rectangle} rx="4" />
@@ -238,9 +241,11 @@ function onTabKeydown(event: KeyboardEvent): void {
                 class="keycode"
                 x={LEGEND_MARGIN}
                 y={key.bounds.height * KEY_UNIT - 10}
-                style:font-size={keycodeFontSize === null ? null : `${keycodeFontSize}px`}
+                style:font-size={keycodeLabelFit.fontSize === null
+                  ? null
+                  : `${keycodeLabelFit.fontSize}px`}
               >
-                {keycodeLabel(key)}
+                {keycodeLabelFit.text}
               </text>
             </g>
           {/each}
