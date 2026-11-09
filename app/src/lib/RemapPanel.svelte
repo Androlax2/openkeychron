@@ -74,6 +74,14 @@ const selectedEncoder = $derived(
   selection === null ? null : encoderPressedBy(editable, selection, selectedKey),
 );
 const target: Target = $derived(selectedEncoder === null ? "press" : chosenTarget);
+const resetWarning = $derived(
+  `${target === "press" ? "Pressing this key" : "Turning the knob this way"} restarts the ` +
+    "keyboard, enters its bootloader or erases its settings, and the keyboard stops typing " +
+    "until it starts again.",
+);
+const selectedPosition = $derived(
+  selection === null ? null : `${selection.row},${selection.column}`,
+);
 const current = $derived(
   selectedKey === null ? null : currentKeycode(selectedKey, selectedEncoder, target),
 );
@@ -98,9 +106,19 @@ const applyHint = $derived(
           ? "The key already has this keycode."
           : "The turn already sends this keycode."
         : isChosenResetting && !isResetConfirmed
-          ? "Confirm that this key may reset the keyboard."
+          ? target === "press"
+            ? "Confirm that this key may reset the keyboard."
+            : "Confirm that this turn may reset the keyboard."
           : null,
 );
+
+// Each key starts at its press: a turn chosen on the knob is not carried to the next key, nor back
+// to the knob after another key. Showing the knob on another layer keeps it.
+$effect.pre(() => {
+  if (selectedPosition !== undefined) {
+    chosenTarget = "press";
+  }
+});
 
 function chooseMode(next: PickerMode): void {
   mode = next;
@@ -310,13 +328,10 @@ function restoreBackup(): void {
       {/if}
       {#if isChosenResetting}
         <div class="risky">
-          <p>
-            Pressing this key restarts the keyboard, enters its bootloader or erases its settings,
-            and the keyboard stops typing until it starts again.
-          </p>
+          <p>{resetWarning}</p>
           <label>
             <input type="checkbox" bind:checked={isResetConfirmed}>
-            Map the key to {chosenName} anyway
+            Map {target === "press" ? "the key" : "the turn"} to {chosenName} anyway
           </label>
         </div>
       {/if}

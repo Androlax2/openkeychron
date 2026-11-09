@@ -126,11 +126,9 @@ pub struct EncoderTurn {
 
 impl EncoderTurn {
     pub fn new(encoder: u8, direction: EncoderDirection) -> Result<Self, GuardError> {
-        if !V5_MAX_FR_ISO
-            .keys
-            .iter()
-            .any(|key| key.encoder == Some(encoder))
-        {
+        // `capture` reads, and a backup holds, encoder 0 alone: the pinned V5 Max ISO definition's
+        // only encoder. A write to any other would fail its read-back only after it was sent.
+        if encoder != 0 {
             return Err(GuardError::NoEncoder { encoder });
         }
         Ok(Self { encoder, direction })

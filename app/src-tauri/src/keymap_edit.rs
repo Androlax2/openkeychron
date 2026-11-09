@@ -1,9 +1,9 @@
-//! The keymap writes the UI makes: set one key or what one turn of an encoder sends, undo the last
-//! change, redo what an undo took back, and restore the keymap from before the first change. Each goes through
-//! `openkeychron_guard::keymap`, which refuses a receiver or an unverified model, has this module
-//! keep the keymap it replaces in memory before it sends anything, and reads the whole keymap
-//! back. This module only decides which backup to
-//! keep and which one to write back.
+//! The keymap writes the UI makes: set one key or what one turn of an encoder sends, undo the
+//! last change, redo what an undo took back, and restore the keymap from before the first
+//! change. Each goes through `openkeychron_guard::keymap`, which refuses a receiver or an
+//! unverified model, has this module keep the keymap it replaces in memory before it sends
+//! anything, and reads the whole keymap back. This module only decides which backup to keep and
+//! which one to write back.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard, PoisonError};

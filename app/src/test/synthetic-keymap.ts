@@ -133,6 +133,26 @@ export const EDITABLE_KEYMAP: EditableKeymap = {
   canRestoreBackup: false,
 };
 
+/**
+ * KEYMAP with Num Lock's slot made the press of encoder 0: the cut-down layout has no room for
+ * the V5 Max's knob at row 0, column 18.
+ */
+export const KNOB = { layer: 0, row: 0, column: 4 };
+
+export const KNOB_KEYMAP: Keymap = {
+  ...KEYMAP,
+  layers: KEYMAP.layers.map((layer) => ({
+    ...layer,
+    keys: layer.keys.map((key) =>
+      key.row === KNOB.row && key.column === KNOB.column
+        ? { ...key, legend: "Knob", encoder: 0 }
+        : key,
+    ),
+  })),
+};
+
+export const EDITABLE_KNOB: EditableKeymap = { ...EDITABLE_KEYMAP, keymap: KNOB_KEYMAP };
+
 /** `keymap` with the key at `row`, `column` on layer `layer` given `keycode` and `name`. */
 export function withKeycode(
   keymap: Keymap,

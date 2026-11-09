@@ -1,8 +1,15 @@
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EDITABLE_KEYMAP, KEYMAP, withKeycode } from "../test/synthetic-keymap";
-import type { EditableKeymap, Keymap } from "./bindings";
+import {
+  EDITABLE_KEYMAP,
+  EDITABLE_KNOB,
+  KEYMAP,
+  KNOB,
+  KNOB_KEYMAP,
+  withKeycode,
+} from "../test/synthetic-keymap";
+import type { EditableKeymap } from "./bindings";
 import type { KeySelection } from "./Keyboard.svelte";
 import RemapPanel from "./RemapPanel.svelte";
 
@@ -18,23 +25,6 @@ const AFTER_ESC: EditableKeymap = {
   canRestoreBackup: true,
 };
 
-/**
- * KEYMAP with Num Lock's slot made the press of encoder 0: the cut-down layout has no room for
- * the V5 Max's knob at row 0, column 18.
- */
-const KNOB: KeySelection = { layer: 0, row: 0, column: 4 };
-const KNOB_KEYMAP: Keymap = {
-  ...KEYMAP,
-  layers: KEYMAP.layers.map((layer) => ({
-    ...layer,
-    keys: layer.keys.map((key) =>
-      key.row === KNOB.row && key.column === KNOB.column
-        ? { ...key, legend: "Knob", encoder: 0 }
-        : key,
-    ),
-  })),
-};
-const EDITABLE_KNOB: EditableKeymap = { ...EDITABLE_KEYMAP, keymap: KNOB_KEYMAP };
 const KNOB_TURNED_TO_ESC: EditableKeymap = {
   ...EDITABLE_KNOB,
   keymap: {
@@ -109,6 +99,28 @@ function status(view: HTMLElement): string | undefined {
 
 function alertText(view: HTMLElement): string | undefined {
   return view.querySelector('[role="alert"]')?.textContent?.trim();
+}
+
+function chooseKind(view: HTMLElement, kind: string): void {
+  const label = [...view.querySelectorAll("fieldset.kind label")].find(
+    (candidate) => candidate.textContent?.trim() === kind,
+  );
+  const radio = label?.querySelector<HTMLInputElement>('input[type="radio"]');
+  if (radio === null || radio === undefined) {
+    throw new Error(`no keycode kind ${kind}`);
+  }
+  radio.click();
+  flushSync();
+}
+
+function typeRaw(view: HTMLElement, text: string): void {
+  const input = view.querySelector<HTMLInputElement>(".raw input");
+  if (input === null) {
+    throw new Error("no raw keycode field");
+  }
+  input.value = text;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
 }
 
 describe("RemapPanel", () => {
@@ -320,33 +332,11 @@ describe("RemapPanel", () => {
   });
 
   describe("building a keycode", () => {
-    function chooseKind(view: HTMLElement, kind: string): void {
-      const label = [...view.querySelectorAll("fieldset.kind label")].find(
-        (candidate) => candidate.textContent?.trim() === kind,
-      );
-      const radio = label?.querySelector<HTMLInputElement>('input[type="radio"]');
-      if (radio === null || radio === undefined) {
-        throw new Error(`no keycode kind ${kind}`);
-      }
-      radio.click();
-      flushSync();
-    }
-
     function tick(view: HTMLElement, modifier: string): void {
       const label = [...view.querySelectorAll("label")].find(
         (candidate) => candidate.textContent?.trim() === modifier,
       );
       label?.querySelector("input")?.click();
-      flushSync();
-    }
-
-    function typeRaw(view: HTMLElement, text: string): void {
-      const input = view.querySelector<HTMLInputElement>(".raw input");
-      if (input === null) {
-        throw new Error("no raw keycode field");
-      }
-      input.value = text;
-      input.dispatchEvent(new Event("input", { bubbles: true }));
       flushSync();
     }
 
@@ -620,6 +610,27 @@ describe("RemapPanel", () => {
             "0, column 4) turned clockwise is ESC (0x0029).",
         );
       });
+    });
+
+    it("warns before a turn sends a keycode that resets the keyboard", () => {
+      const view = render(EDITABLE_KNOB, KNOB);
+      chooseTarget(view, "Turn clockwise");
+      chooseKind(view, "Raw value");
+      typeRaw(view, "7c00");
+      expect(view.querySelector(".raw .risky")?.textContent).toContain(
+        "Turning the knob this way restarts the keyboard, enters its bootloader or erases its " +
+          "settings",
+      );
+    });
+
+    it("asks to confirm that a turn may reset the keyboard", () => {
+      const view = render(EDITABLE_KNOB, KNOB);
+      chooseTarget(view, "Turn clockwise");
+      chooseKind(view, "Raw value");
+      typeRaw(view, "7c00");
+      expect(view.querySelector(".apply-hint")?.textContent?.trim()).toBe(
+        "Confirm that this turn may reset the keyboard.",
+      );
     });
 
     it("still sets the knob's press while Press is chosen", async () => {

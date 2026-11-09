@@ -3,8 +3,8 @@
 //! `set_keycode`, `set_encoder_keycode`, `undo_keymap_change`, `redo_keymap_change` and
 //! `restore_keymap_backup` write the keymap, through the guarded write path in `keymap_edit`. The
 //! keymap commands use the history of the device's connection, not of its path, so a keyboard
-//! plugged in again on that path starts a new one. Devices come from the `DeviceSource`: the connected keyboards, or the
-//! fixtures of mock mode.
+//! plugged in again on that path starts a new one. Devices come from the `DeviceSource`: the
+//! connected keyboards, or the fixtures of mock mode.
 //!
 //! A new command goes in three places: `generate_handler!` in `main.rs`, `COMMANDS` in
 //! `build.rs` (which generates its `allow-` permission) and `capabilities/default.json`.
