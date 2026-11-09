@@ -7,7 +7,7 @@ export type KeySelection = { layer: number; row: number; column: number };
 </script>
 
 <script lang="ts">
-import type { Bounds, Key, Keymap } from "./bindings";
+import type { Bounds, Encoder, EncoderKeycode, Key, Keymap } from "./bindings";
 import { arrowDirection, neighbour } from "./keyboard-navigation";
 import { fitKeycodeLabel, shortenKeycodeName } from "./keycode-label";
 import { describeKeycode, hex } from "./keycode-text";
@@ -28,6 +28,10 @@ let {
 const INSET = 3;
 // Where legends start inside a key: the same distance from the key's left and right edges.
 const LEGEND_MARGIN = 10;
+// A turn line sits this far above the key's bottom edge, with this much between the two lines:
+// below the base legend, above the keycode label, on the V5 Max's 1u knob with no Shift legend.
+const FIRST_TURN_ABOVE_BOTTOM = 31;
+const TURN_LINE_SPACING = 10;
 const id = $props.id();
 let layerPosition = $state(0);
 let focused: MatrixPosition | null = $state(null);
@@ -105,6 +109,37 @@ function legendLines(key: PlacedKey): string[] {
   return legend.length > 6 && key.bounds.width < 1.5 ? legend.split(" ") : [legend];
 }
 
+const TURNS = [
+  { direction: "counterClockwise", arrow: "↺", text: "counter-clockwise" },
+  { direction: "clockwise", arrow: "↻", text: "clockwise" },
+] as const;
+
+/** The encoder on the shown layer whose press `key` is, if it is one. */
+function encoderPressedBy(key: Key): Encoder | null {
+  if (key.encoder === null) {
+    return null;
+  }
+  return shownLayer?.encoders.find((encoder) => encoder.index === key.encoder) ?? null;
+}
+
+function turnKeycodeLabel(sent: EncoderKeycode): string {
+  return sent.name === null ? hex(sent.keycode) : sent.name;
+}
+
+/** What each turn of the encoder `key` presses sends, for drawing on the key. */
+function turnsOf(key: Key): { arrow: string; text: string; label: string; sent: EncoderKeycode }[] {
+  const encoder = encoderPressedBy(key);
+  if (encoder === null) {
+    return [];
+  }
+  return TURNS.map(({ direction, arrow, text }) => ({
+    arrow,
+    text,
+    label: `${arrow} ${turnKeycodeLabel(encoder[direction])}`,
+    sent: encoder[direction],
+  }));
+}
+
 function accessibleName(key: Key): string {
   return [
     baseLegend(key),
@@ -112,6 +147,7 @@ function accessibleName(key: Key): string {
     key.altGrLegend === null ? null : `AltGr ${key.altGrLegend}`,
     key.azertyText === null ? null : `types ${key.azertyText}`,
     `keycode ${describeKeycode(key)}`,
+    ...turnsOf(key).map(({ text, sent }) => `turned ${text} sends ${describeKeycode(sent)}`),
   ]
     .filter((part) => part !== null)
     .join(", ");
@@ -198,6 +234,7 @@ function onTabKeydown(event: KeyboardEvent): void {
             {@const isSelected = isAt(key, selected)}
             {@const lines = legendLines(key)}
             {@const keycodeLabelFit = fittedKeycodeLabel(key)}
+            {@const turns = turnsOf(key)}
             <g
               role="option"
               class="key"
@@ -244,6 +281,22 @@ function onTabKeydown(event: KeyboardEvent): void {
                   {key.altGrLegend}
                 </text>
               {/if}
+              {#each turns as turn, turnNumber (turn.text)}
+                {@const turnFit = fitKeycodeLabel(
+                  turn.label,
+                  key.bounds.width * KEY_UNIT - 2 * LEGEND_MARGIN,
+                )}
+                <text
+                  class="turn"
+                  x={LEGEND_MARGIN}
+                  y={key.bounds.height * KEY_UNIT -
+                    FIRST_TURN_ABOVE_BOTTOM +
+                    turnNumber * TURN_LINE_SPACING}
+                  style:font-size={turnFit.fontSize === null ? null : `${turnFit.fontSize}px`}
+                >
+                  {turnFit.text}
+                </text>
+              {/each}
               <text
                 class="keycode"
                 x={LEGEND_MARGIN}
@@ -290,7 +343,8 @@ svg {
 }
 
 .legend,
-.keycode {
+.keycode,
+.turn {
   fill: ButtonText;
   font-family: system-ui, sans-serif;
   pointer-events: none;
@@ -305,7 +359,8 @@ svg {
   font-size: 10px;
 }
 
-.keycode {
+.keycode,
+.turn {
   font-size: 9px;
   fill: GrayText;
 }
@@ -315,7 +370,8 @@ svg {
 }
 
 .key.selected .legend,
-.key.selected .keycode {
+.key.selected .keycode,
+.key.selected .turn {
   fill: HighlightText;
 }
 

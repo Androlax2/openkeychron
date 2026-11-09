@@ -1,6 +1,6 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, describe, expect, it } from "vitest";
-import { KEYMAP, withKeycode } from "../test/synthetic-keymap";
+import { KEYMAP, KNOB_KEYMAP, withKeycode } from "../test/synthetic-keymap";
 import type { Keymap } from "./bindings";
 import Keyboard, { KEY_UNIT, type KeySelection } from "./Keyboard.svelte";
 
@@ -334,5 +334,82 @@ describe("Keyboard", () => {
     }
     click(secondLayer);
     expect(selections).toEqual([]);
+  });
+
+  describe("the knob's turns", () => {
+    function knobKey(view: HTMLElement): SVGGElement {
+      return keyNamed(view, "Knob");
+    }
+
+    function turnTexts(key: SVGGElement): string[] {
+      return [...key.querySelectorAll(".turn")].map((turn) => turn.textContent?.trim() ?? "");
+    }
+
+    it("names what each turn sends in the knob key's accessible name", () => {
+      const label = knobKey(render(KNOB_KEYMAP)).getAttribute("aria-label");
+      expect(label).toContain("turned counter-clockwise sends VOLD (0x00aa)");
+      expect(label).toContain("turned clockwise sends VOLU (0x00a9)");
+    });
+
+    it("draws what each turn sends on the knob key", () => {
+      expect(turnTexts(knobKey(render(KNOB_KEYMAP)))).toEqual(["↺ VOLD", "↻ VOLU"]);
+    });
+
+    it("shows the turns of the layer being shown", () => {
+      const view = render(KNOB_KEYMAP);
+      const [, secondLayer] = layerTabs(view);
+      if (secondLayer === undefined) {
+        throw new Error("no second layer tab");
+      }
+      click(secondLayer);
+      expect(turnTexts(knobKey(view))).toEqual(["↺ TRNS", "↻ TRNS"]);
+    });
+
+    it("shows the raw value of a turn whose keycode has no name", () => {
+      const keymap: Keymap = {
+        ...KNOB_KEYMAP,
+        layers: KNOB_KEYMAP.layers.map((layer) => ({
+          ...layer,
+          encoders: layer.encoders.map((encoder) => ({
+            ...encoder,
+            clockwise: { keycode: 0x7e40, name: null },
+          })),
+        })),
+      };
+      expect(turnTexts(knobKey(render(keymap)))).toEqual(["↺ VOLD", "↻ 0x7e40"]);
+    });
+
+    it("draws no turns on a key that is not an encoder's press", () => {
+      expect(turnTexts(keyNamed(render(KNOB_KEYMAP), "Z"))).toEqual([]);
+    });
+
+    it("names no turns in the accessible name of an ordinary key", () => {
+      expect(keyNamed(render(KNOB_KEYMAP), "Z").getAttribute("aria-label")).not.toContain("turned");
+    });
+
+    it("shrinks a turn label too long for the key", () => {
+      const keymap: Keymap = {
+        ...KNOB_KEYMAP,
+        layers: KNOB_KEYMAP.layers.map((layer) => ({
+          ...layer,
+          encoders: layer.encoders.map((encoder) => ({
+            ...encoder,
+            clockwise: { keycode: 0x00ee, name: "KC_MS_WH_UP" },
+          })),
+        })),
+      };
+      const turn = knobKey(render(keymap)).querySelectorAll<SVGTextElement>(".turn")[1];
+      expect(turn?.style.fontSize).not.toBe("");
+    });
+
+    it("draws no turns when the layer has no entry for the key's encoder", () => {
+      const keymap: Keymap = {
+        ...KNOB_KEYMAP,
+        layers: KNOB_KEYMAP.layers.map((layer) => ({ ...layer, encoders: [] })),
+      };
+      const key = knobKey(render(keymap));
+      expect(turnTexts(key)).toEqual([]);
+      expect(key.getAttribute("aria-label")).not.toContain("turned");
+    });
   });
 });
