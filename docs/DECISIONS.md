@@ -330,3 +330,22 @@ keyboard, and every other `.toml` file is still a replayed fixture.
 
 Rejected: a directory with one fixture per command. It lets one device answer every read
 panel, but still shows no edit on read-back.
+
+## 2026-11: Linux packages are a deb and an AppImage from Tauri's bundler (#39)
+
+`pnpm --dir app tauri build` makes both. No packaging tool of our own: Tauri's bundler already
+writes both formats, needs no Debian tools for the deb, and keeps the package metadata in
+`tauri.conf.json`.
+
+- **The deb installs the udev rule** at `/usr/lib/udev/rules.d/70-openkeychron.rules`, the
+  directory for rules that packages own, so `/etc/udev/rules.d/` stays the administrator's.
+  It maps the file in `packaging/linux/`, so the repository holds one copy of the rule; a test
+  in `app/src-tauri/tests/linux_bundle.rs` fails if the mapping drifts.
+- **No maintainer scripts.** Reloading the rules and applying them to a device that is already
+  plugged in are two documented commands, or a replug. A post-install script would run as root
+  for that one step.
+- **The AppImage cannot install the rule**, so `docs/INSTALL-linux.md` explains the manual
+  install. It is the package that runs on Arch, which has no deb support.
+
+Rejected for now: an Arch package (PKGBUILD) and an RPM. Neither is in the issue, and Tauri
+does not make a PKGBUILD.
