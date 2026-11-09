@@ -485,6 +485,23 @@ describe("RemapPanel", () => {
       expect(chosenText(view)).toBe("New keycode: 0x7e05");
     });
 
+    it("names a Keychron custom keycode with the connected model's name before applying it", () => {
+      const view = render();
+      chooseKind(view, "Raw value");
+      typeRaw(view, "7e08");
+      expect(chosenText(view)).toBe("New keycode: SNAP (0x7e08)");
+    });
+
+    it("shows a custom keycode by its value for a model that names none", () => {
+      const view = render({
+        ...EDITABLE_KEYMAP,
+        keymap: { ...EDITABLE_KEYMAP.keymap, customKeycodeNames: [] },
+      });
+      chooseKind(view, "Raw value");
+      typeRaw(view, "7e08");
+      expect(chosenText(view)).toBe("New keycode: 0x7e08");
+    });
+
     it("applies a raw keycode", async () => {
       const calls: unknown[] = [];
       mockIPC((command, payload) => {

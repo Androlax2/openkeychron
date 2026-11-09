@@ -18,7 +18,12 @@ export type DeviceInfo = { viaProtocolVersion: number, viaFirmwareVersion: numbe
 
 export type KeychronFirmware = { "kind": "reported", version: string, buildDate: string, } | { "kind": "notReported", reason: string, };
 
-export type Keymap = { layerCount: number, rows: number, columns: number, layers: Array<Layer>, };
+export type Keymap = { layerCount: number, rows: number, columns: number, layers: Array<Layer>, 
+/**
+ * The connected model's names for Keychron custom keycodes, so the app can name a raw value
+ * before it is written. Empty for a model whose names the firmware source does not settle.
+ */
+customKeycodeNames: Array<CustomKeycodeName>, };
 
 export type Layer = { index: number, 
 /**
@@ -71,6 +76,8 @@ azertyText: string | null,
  * The index of the encoder whose press this key is, such as the V5 Max's knob.
  */
 encoder: number | null, };
+
+export type CustomKeycodeName = { keycode: number, name: string, };
 
 export type Encoder = { 
 /**

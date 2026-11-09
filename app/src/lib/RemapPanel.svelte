@@ -90,7 +90,13 @@ const selectedKeyText = $derived(
     ? "No key selected."
     : `Layer ${selection.layer}, ${describeTarget(selectedKey, target)}: ${describeKeycode(current)}`,
 );
-const chosenName = $derived(chosen === null ? null : keycodeName(chosen));
+const chosenName = $derived(
+  chosen === null
+    ? null
+    : (keycodeName(chosen) ??
+        editable.keymap.customKeycodeNames.find((entry) => entry.keycode === chosen)?.name ??
+        null),
+);
 const chosenText = $derived(
   chosen === null ? "none chosen" : describeKeycode({ keycode: chosen, name: chosenName }),
 );

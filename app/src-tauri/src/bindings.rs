@@ -15,7 +15,7 @@ use crate::info::{DeviceInfo, KeychronFirmware};
 use crate::keycode_catalog::{
     self, KeycodeCategory, KeycodeChoice, KeycodeWrapperChoice, ModifierChoice, WrapperBuilder,
 };
-use crate::keymap::{Bounds, Encoder, EncoderKeycode, Key, Keymap, Layer};
+use crate::keymap::{Bounds, CustomKeycodeName, Encoder, EncoderKeycode, Key, Keymap, Layer};
 use crate::keymap_edit::{EditableKeymap, EncoderAssignment, KeyAssignment, TurnDirection};
 use crate::macros::{Action, MacroContent, MacroList, MacroSlot};
 use crate::settings::{
@@ -34,6 +34,7 @@ fn bindings() -> String {
         Keymap::decl(&config),
         Layer::decl(&config),
         Key::decl(&config),
+        CustomKeycodeName::decl(&config),
         Encoder::decl(&config),
         EncoderKeycode::decl(&config),
         Bounds::decl(&config),
