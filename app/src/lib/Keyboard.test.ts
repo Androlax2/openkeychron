@@ -123,7 +123,9 @@ describe("Keyboard", () => {
       },
     );
     const enter = keyNamed(render(keymap), "Enter");
-    expect(enter.getAttribute("transform")).toContain("rotate(90 ");
+    expect(enter.getAttribute("transform")).toBe(
+      `rotate(90 ${13.5 * KEY_UNIT} ${2.25 * KEY_UNIT}) translate(${13.75 * KEY_UNIT} ${2.25 * KEY_UNIT})`,
+    );
     expect(enter.querySelectorAll("rect.cap-fill")).toHaveLength(2);
   });
 

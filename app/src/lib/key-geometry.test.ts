@@ -29,7 +29,7 @@ describe("keyExtent", () => {
   it("reaches further down and across for a key turned 45 degrees", () => {
     const extent = keyExtent(placed({ angleDegrees: 45, originX: 1, originY: 0 }));
     expect(extent.right).toBeCloseTo(1 + Math.SQRT1_2);
-    expect(extent.bottom).toBeCloseTo(2 * Math.SQRT1_2 + 0);
+    expect(extent.bottom).toBeCloseTo(2 * Math.SQRT1_2);
     expect(extent.left).toBeCloseTo(1 - Math.SQRT1_2);
   });
 
