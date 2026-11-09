@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use thiserror::Error;
 
-use crate::keycode_name::{V5_MAX_KEYCHRON_NAMES, keychron_name};
+use crate::keycode_name::{V5_MAX_KEYCHRON_NAMES, keychron_name, keychron_names_listed};
 use crate::{KeyboardLayout, Keycode, V5_MAX_FR_ISO, ViaDefinition};
 
 /// A model's layout: a table compiled into openkeychron, or one read from a VIA definition.
@@ -100,6 +100,16 @@ impl RegisteredModel {
         keycode
             .name()
             .or_else(|| keychron_name(keycode, self.keychron_names).map(str::to_owned))
+    }
+
+    /// Every Keychron custom keycode this model names, by value, in keycode order. Empty for a
+    /// model read from a definition file.
+    #[must_use]
+    pub fn custom_keycode_names(&self) -> Vec<(u16, String)> {
+        keychron_names_listed(self.keychron_names)
+            .into_iter()
+            .map(|(keycode, name)| (keycode, name.to_owned()))
+            .collect()
     }
 }
 

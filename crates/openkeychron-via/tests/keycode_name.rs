@@ -272,6 +272,19 @@ mod tests {
     }
 
     #[test]
+    fn lists_the_v5_max_iso_custom_keycode_names_with_their_values() {
+        let registry = DeviceRegistry::built_in();
+        let listed = registry
+            .model(0x3434, 0x0951)
+            .unwrap()
+            .custom_keycode_names();
+        let expected: Vec<_> = (0x7e00..=0x7e0f)
+            .map(|raw| (raw, v5_max_iso_name(raw).unwrap()))
+            .collect();
+        assert_eq!(listed, expected);
+    }
+
+    #[test]
     fn gives_no_name_to_keyboard_keycodes_past_the_v5_max_iso_ones() {
         for raw in [0x7e10, 0x7e1f, 0x7e3f, 0x7e40] {
             assert_eq!(v5_max_iso_name(raw), None, "{raw:#06x}");

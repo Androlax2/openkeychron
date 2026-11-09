@@ -11,10 +11,6 @@ use serde::Serialize;
 
 use crate::error::CommandError;
 
-/// Keychron's custom keycodes, `QK_KB_0` to `QK_KB_MAX` in QMK's `keycodes.h`.
-const QK_KB_0: u16 = 0x7e00;
-const QK_KB_MAX: u16 = 0x7e3f;
-
 #[derive(Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
@@ -192,15 +188,11 @@ pub fn read<T: HidTransport>(
     })
 }
 
-/// Every keycode in Keychron's custom range that `model` names; `Keycode::name` names none of
-/// them, so a name here is the model's own.
 fn custom_keycode_names(model: &RegisteredModel) -> Vec<CustomKeycodeName> {
-    (QK_KB_0..=QK_KB_MAX)
-        .filter_map(|keycode| {
-            model
-                .keycode_name(Keycode::from(keycode))
-                .map(|name| CustomKeycodeName { keycode, name })
-        })
+    model
+        .custom_keycode_names()
+        .into_iter()
+        .map(|(keycode, name)| CustomKeycodeName { keycode, name })
         .collect()
 }
 

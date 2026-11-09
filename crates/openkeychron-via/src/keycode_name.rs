@@ -142,6 +142,11 @@ pub(crate) fn keychron_name(keycode: Keycode, names: &[&'static str]) -> Option<
     names.get(usize::from(raw - QK_KB_0)).copied()
 }
 
+/// Every custom keycode `names` names, with its value, in keycode order.
+pub(crate) fn keychron_names_listed(names: &[&'static str]) -> Vec<(u16, &'static str)> {
+    (QK_KB_0..=QK_KB_MAX).zip(names.iter().copied()).collect()
+}
+
 fn quantum_name(raw: u16) -> Option<&'static str> {
     QUANTUM_NAMES
         .iter()
