@@ -11,6 +11,10 @@ use serde::Serialize;
 
 use crate::error::CommandError;
 
+/// Keychron's custom keycodes, `QK_KB_0` to `QK_KB_MAX` in QMK's `keycodes.h`.
+const QK_KB_0: u16 = 0x7e00;
+const QK_KB_MAX: u16 = 0x7e3f;
+
 #[derive(Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
@@ -19,6 +23,17 @@ pub struct Keymap {
     pub rows: u8,
     pub columns: u8,
     pub layers: Vec<Layer>,
+    /// The connected model's names for Keychron custom keycodes, so the app can name a raw value
+    /// before it is written. Empty for a model whose names the firmware source does not settle.
+    pub custom_keycode_names: Vec<CustomKeycodeName>,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct CustomKeycodeName {
+    pub keycode: u16,
+    pub name: String,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -173,7 +188,20 @@ pub fn read<T: HidTransport>(
         rows: layout.rows(),
         columns: layout.columns(),
         layers,
+        custom_keycode_names: custom_keycode_names(model),
     })
+}
+
+/// Every keycode in Keychron's custom range that `model` names; `Keycode::name` names none of
+/// them, so a name here is the model's own.
+fn custom_keycode_names(model: &RegisteredModel) -> Vec<CustomKeycodeName> {
+    (QK_KB_0..=QK_KB_MAX)
+        .filter_map(|keycode| {
+            model
+                .keycode_name(Keycode::from(keycode))
+                .map(|name| CustomKeycodeName { keycode, name })
+        })
+        .collect()
 }
 
 /// The encoders the layout's keys name, in index order.
@@ -368,6 +396,34 @@ mod tests {
         let layer_size = usize::from(model.layout().rows()) * usize::from(model.layout().columns());
         let placed = keys(model, &vec![0x7e00u16.into(); layer_size]);
         assert!(placed.iter().all(|key| key.name.is_none()));
+    }
+
+    #[test]
+    fn lists_the_connected_models_custom_keycode_names() {
+        let keymap = read_synthetic_keymap();
+        let names: Vec<(u16, &str)> = keymap
+            .custom_keycode_names
+            .iter()
+            .map(|entry| (entry.keycode, entry.name.as_str()))
+            .collect();
+        assert_eq!(names.len(), 16);
+        assert_eq!(names[0], (0x7e00, "LOPTN"));
+        assert_eq!(names[8], (0x7e08, "SNAP"));
+        assert_eq!(names[15], (0x7e0f, "BAT_LVL"));
+    }
+
+    #[test]
+    fn lists_no_custom_keycode_name_for_a_model_from_a_definition_file() {
+        let text = std::fs::read_to_string(crate::test_support::synthetic_path(
+            "via-definition-second-model.json",
+        ))
+        .unwrap();
+        let mut registry = DeviceRegistry::built_in();
+        registry
+            .register(ViaDefinition::from_json(&text).unwrap())
+            .unwrap();
+        let model = registry.model(0x3434, 0x0950).unwrap();
+        assert_eq!(super::custom_keycode_names(model), vec![]);
     }
 
     #[test]

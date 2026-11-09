@@ -134,6 +134,11 @@ export const KEYMAP: Keymap = {
     { index: 0, keys: assign(FRENCH_TYPING), encoders: [knob([0x00aa, "VOLD"], [0x00a9, "VOLU"])] },
     { index: 1, keys: assign(FUNCTION_LAYER), encoders: [knob(TRNS, TRNS)] },
   ],
+  // A partial list of the V5 Max ISO names; 0x7e05 (LNPAD there) is left out on purpose, to test a keycode without a name.
+  customKeycodeNames: [
+    { keycode: 0x7e00, name: "LOPTN" },
+    { keycode: 0x7e08, name: "SNAP" },
+  ],
 };
 
 /** KEYMAP as `read_keymap` returns it before the app changed anything. */
