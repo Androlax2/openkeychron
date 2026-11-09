@@ -1,10 +1,18 @@
 <script lang="ts">
-import type { EditableKeymap, Key, WrapperBuilder } from "./bindings";
+import type {
+  EditableKeymap,
+  Encoder,
+  EncoderKeycode,
+  Key,
+  TurnDirection,
+  WrapperBuilder,
+} from "./bindings";
 import { KEYCODE_CATEGORIES } from "./bindings";
 import {
   readKeymap,
   redoKeymapChange,
   restoreKeymapBackup,
+  setEncoderKeycode,
   setKeycode,
   undoKeymapChange,
 } from "./commands";
@@ -29,6 +37,13 @@ let {
 } = $props();
 
 type Outcome = { failed: boolean; text: string };
+/** What the panel remaps on the selected key: its press, or a turn of the encoder it presses. */
+type Target = "press" | TurnDirection;
+
+const TURNS: { direction: TurnDirection; label: string; text: string }[] = [
+  { direction: "counterClockwise", label: "Turn counter-clockwise", text: "counter-clockwise" },
+  { direction: "clockwise", label: "Turn clockwise", text: "clockwise" },
+];
 type PickerMode = "list" | WrapperBuilder | "raw";
 
 const PICKER_MODES: { mode: PickerMode; label: string }[] = [
@@ -46,6 +61,7 @@ const RESETTING_KEYCODE_NAMES = new Set(["QK_BOOT", "QK_RBT", "EE_CLR"]);
 
 const id = $props.id();
 let mode: PickerMode = $state("list");
+let chosenTarget: Target = $state("press");
 let chosen: number | null = $state(null);
 let rawText = $state("");
 let isResetConfirmed = $state(false);
@@ -54,10 +70,17 @@ let pending: string | null = $state(null);
 let outcome: Outcome | null = $state(null);
 
 const selectedKey = $derived(selection === null ? null : keyAt(editable, selection));
+const selectedEncoder = $derived(
+  selection === null ? null : encoderPressedBy(editable, selection, selectedKey),
+);
+const target: Target = $derived(selectedEncoder === null ? "press" : chosenTarget);
+const current = $derived(
+  selectedKey === null ? null : currentKeycode(selectedKey, selectedEncoder, target),
+);
 const selectedKeyText = $derived(
-  selection === null || selectedKey === null
+  selection === null || selectedKey === null || current === null
     ? "No key selected."
-    : `Layer ${selection.layer}, ${describeKey(selectedKey)}: ${describeKeycode(selectedKey)}`,
+    : `Layer ${selection.layer}, ${describeTarget(selectedKey, target)}: ${describeKeycode(current)}`,
 );
 const chosenName = $derived(chosen === null ? null : keycodeName(chosen));
 const chosenText = $derived(
@@ -70,8 +93,10 @@ const applyHint = $derived(
     ? "Select a key on the keyboard first."
     : chosen === null
       ? "Choose a keycode for it."
-      : chosen === selectedKey.keycode
-        ? "The key already has this keycode."
+      : chosen === current?.keycode
+        ? target === "press"
+          ? "The key already has this keycode."
+          : "The turn already sends this keycode."
         : isChosenResetting && !isResetConfirmed
           ? "Confirm that this key may reset the keyboard."
           : null,
@@ -92,17 +117,41 @@ function keyAt(keymap: EditableKeymap, at: KeySelection): Key | null {
   );
 }
 
+/** The encoder on the selected layer whose press `key` is, if it is one. */
+function encoderPressedBy(
+  keymap: EditableKeymap,
+  at: KeySelection,
+  key: Key | null,
+): Encoder | null {
+  return key === null || key.encoder === null
+    ? null
+    : (keymap.keymap.layers
+        .find((layer) => layer.index === at.layer)
+        ?.encoders.find((encoder) => encoder.index === key.encoder) ?? null);
+}
+
+function currentKeycode(key: Key, encoder: Encoder | null, at: Target): EncoderKeycode | Key {
+  return encoder === null || at === "press" ? key : encoder[at];
+}
+
 function describeKey(key: Key): string {
   const legend = key.legend ?? `${key.row},${key.column}`;
   return `${legend} (row ${key.row}, column ${key.column})`;
 }
 
-/** The key's keycode in the keymap the keyboard read back, when a key was selected. */
-function readBack(updated: EditableKeymap, at: KeySelection | null): string {
+function describeTarget(key: Key, at: Target): string {
+  const turn = TURNS.find((candidate) => candidate.direction === at);
+  return turn === undefined ? describeKey(key) : `${describeKey(key)} turned ${turn.text}`;
+}
+
+/** What the selected key's target sends in the keymap the keyboard read back. */
+function readBack(updated: EditableKeymap, at: KeySelection | null, of: Target): string {
   const key = at === null ? null : keyAt(updated, at);
-  return at === null || key === null
-    ? ""
-    : ` Read back: layer ${at.layer}, ${describeKey(key)} is ${describeKeycode(key)}.`;
+  if (at === null || key === null) {
+    return "";
+  }
+  const sent = currentKeycode(key, encoderPressedBy(updated, at, key), of);
+  return ` Read back: layer ${at.layer}, ${describeTarget(key, of)} is ${describeKeycode(sent)}.`;
 }
 
 async function write(
@@ -112,6 +161,7 @@ async function write(
   send: () => Promise<EditableKeymap>,
 ): Promise<void> {
   const at = selection;
+  const of = target;
   pending = progress;
   outcome = null;
   try {
@@ -119,7 +169,7 @@ async function write(
     onchange(updated);
     outcome = {
       failed: false,
-      text: `${done}, and the whole keymap read back as expected.${readBack(updated, at)}`,
+      text: `${done}, and the whole keymap read back as expected.${readBack(updated, at, of)}`,
     };
   } catch (reason: unknown) {
     outcome = { failed: true, text: `${failure}: ${String(reason)}${await readAgain()}` };
@@ -145,8 +195,18 @@ function apply(): void {
   if (selection === null || chosen === null) {
     return;
   }
-  const assignment = { ...selection, keycode: chosen };
-  write("Applying…", "Applied", "Cannot apply", () => setKeycode(path, assignment));
+  if (target === "press" || selectedEncoder === null) {
+    const assignment = { ...selection, keycode: chosen };
+    write("Applying…", "Applied", "Cannot apply", () => setKeycode(path, assignment));
+    return;
+  }
+  const assignment = {
+    layer: selection.layer,
+    encoder: selectedEncoder.index,
+    direction: target,
+    keycode: chosen,
+  };
+  write("Applying…", "Applied", "Cannot apply", () => setEncoderKeycode(path, assignment));
 }
 
 function undo(): void {
@@ -168,6 +228,38 @@ function restoreBackup(): void {
   <h2 id="{id}-heading">Remap a key</h2>
 
   <p class="selected-key">{selectedKeyText}</p>
+
+  {#if selectedKey !== null && selectedEncoder !== null}
+    <fieldset class="target">
+      <legend>What to remap</legend>
+      <label>
+        <input
+          type="radio"
+          name="{id}-target"
+          value="press"
+          checked={chosenTarget === "press"}
+          onchange={() => {
+            chosenTarget = "press";
+          }}
+        >
+        Press: {describeKeycode(selectedKey)}
+      </label>
+      {#each TURNS as turn (turn.direction)}
+        <label>
+          <input
+            type="radio"
+            name="{id}-target"
+            value={turn.direction}
+            checked={chosenTarget === turn.direction}
+            onchange={() => {
+              chosenTarget = turn.direction;
+            }}
+          >
+          {turn.label}: {describeKeycode(selectedEncoder[turn.direction])}
+        </label>
+      {/each}
+    </fieldset>
+  {/if}
 
   <fieldset class="kind">
     <legend>Kind of keycode</legend>
@@ -303,7 +395,8 @@ function restoreBackup(): void {
   gap: 0.5rem;
 }
 
-.kind label {
+.kind label,
+.target label {
   margin-right: 0.75rem;
   white-space: nowrap;
 }

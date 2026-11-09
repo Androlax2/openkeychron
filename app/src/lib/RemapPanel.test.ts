@@ -2,7 +2,7 @@ import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EDITABLE_KEYMAP, KEYMAP, withKeycode } from "../test/synthetic-keymap";
-import type { EditableKeymap } from "./bindings";
+import type { EditableKeymap, Keymap } from "./bindings";
 import type { KeySelection } from "./Keyboard.svelte";
 import RemapPanel from "./RemapPanel.svelte";
 
@@ -15,6 +15,43 @@ const AFTER_ESC: EditableKeymap = {
   keymap: withKeycode(KEYMAP, Z_KEY, KC_ESC, "ESC"),
   undoSteps: 1,
   redoSteps: 0,
+  canRestoreBackup: true,
+};
+
+/**
+ * KEYMAP with Num Lock's slot made the press of encoder 0: the cut-down layout has no room for
+ * the V5 Max's knob at row 0, column 18.
+ */
+const KNOB: KeySelection = { layer: 0, row: 0, column: 4 };
+const KNOB_KEYMAP: Keymap = {
+  ...KEYMAP,
+  layers: KEYMAP.layers.map((layer) => ({
+    ...layer,
+    keys: layer.keys.map((key) =>
+      key.row === KNOB.row && key.column === KNOB.column
+        ? { ...key, legend: "Knob", encoder: 0 }
+        : key,
+    ),
+  })),
+};
+const EDITABLE_KNOB: EditableKeymap = { ...EDITABLE_KEYMAP, keymap: KNOB_KEYMAP };
+const KNOB_TURNED_TO_ESC: EditableKeymap = {
+  ...EDITABLE_KNOB,
+  keymap: {
+    ...KNOB_KEYMAP,
+    layers: KNOB_KEYMAP.layers.map((layer) =>
+      layer.index !== 0
+        ? layer
+        : {
+            ...layer,
+            encoders: layer.encoders.map((encoder) => ({
+              ...encoder,
+              clockwise: { keycode: KC_ESC, name: "ESC" },
+            })),
+          },
+    ),
+  },
+  undoSteps: 1,
   canRestoreBackup: true,
 };
 
@@ -488,6 +525,116 @@ describe("RemapPanel", () => {
       chooseKind(view, "Raw value");
       typeRaw(view, "0x12345");
       expect(button(view, "Apply").disabled).toBe(true);
+    });
+  });
+
+  describe("on the knob", () => {
+    function targets(view: HTMLElement): string[] {
+      return [...view.querySelectorAll(".target label")].map(
+        (label) => label.textContent?.trim().replace(/\s+/g, " ") ?? "",
+      );
+    }
+
+    function chooseTarget(view: HTMLElement, name: string): void {
+      const label = [...view.querySelectorAll(".target label")].find((candidate) =>
+        candidate.textContent?.trim().startsWith(name),
+      );
+      const radio = label?.querySelector<HTMLInputElement>('input[type="radio"]');
+      if (radio === null || radio === undefined) {
+        throw new Error(`no target named ${name}`);
+      }
+      radio.click();
+      flushSync();
+    }
+
+    it("offers its press and both turns, with what each sends now", () => {
+      const view = render(EDITABLE_KNOB, KNOB);
+      expect(targets(view)).toEqual([
+        "Press: NUM (0x0053)",
+        "Turn counter-clockwise: VOLD (0x00aa)",
+        "Turn clockwise: VOLU (0x00a9)",
+      ]);
+    });
+
+    it("shows what the turns send on the selected layer", () => {
+      const view = render(EDITABLE_KNOB, { ...KNOB, layer: 1 });
+      expect(targets(view).slice(1)).toEqual([
+        "Turn counter-clockwise: TRNS (0x0001)",
+        "Turn clockwise: TRNS (0x0001)",
+      ]);
+    });
+
+    it("offers no turns for a key that is no encoder's press", () => {
+      const view = render(EDITABLE_KNOB, Z_KEY);
+      expect(targets(view)).toEqual([]);
+    });
+
+    it("names the chosen turn and what it sends now", () => {
+      const view = render(EDITABLE_KNOB, KNOB);
+      chooseTarget(view, "Turn clockwise");
+      expect(view.querySelector(".selected-key")?.textContent?.trim()).toBe(
+        "Layer 0, Knob (row 0, column 4) turned clockwise: VOLU (0x00a9)",
+      );
+    });
+
+    it("says the turn already sends the chosen keycode", () => {
+      const view = render(EDITABLE_KNOB, KNOB);
+      chooseTarget(view, "Turn clockwise");
+      choose(view, "VOLU");
+      expect(view.querySelector(".apply-hint")?.textContent?.trim()).toBe(
+        "The turn already sends this keycode.",
+      );
+    });
+
+    it("sets what turning the knob sends to the chosen keycode", async () => {
+      const calls: unknown[] = [];
+      mockIPC((command, payload) => {
+        calls.push([command, payload]);
+        return KNOB_TURNED_TO_ESC;
+      });
+      const view = render(EDITABLE_KNOB, KNOB);
+      chooseTarget(view, "Turn clockwise");
+      choose(view, "ESC");
+      button(view, "Apply").click();
+      await vi.waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls).toEqual([
+        [
+          "set_encoder_keycode",
+          {
+            path: PATH,
+            assignment: { layer: 0, encoder: 0, direction: "clockwise", keycode: KC_ESC },
+          },
+        ],
+      ]);
+    });
+
+    it("shows the turn as the keyboard read it back after applying", async () => {
+      mockIPC(() => KNOB_TURNED_TO_ESC);
+      const view = render(EDITABLE_KNOB, KNOB);
+      chooseTarget(view, "Turn clockwise");
+      choose(view, "ESC");
+      button(view, "Apply").click();
+      await vi.waitFor(() => {
+        expect(status(view)).toBe(
+          "Applied, and the whole keymap read back as expected. Read back: layer 0, Knob (row " +
+            "0, column 4) turned clockwise is ESC (0x0029).",
+        );
+      });
+    });
+
+    it("still sets the knob's press while Press is chosen", async () => {
+      const calls: unknown[] = [];
+      mockIPC((command, payload) => {
+        calls.push([command, payload]);
+        return EDITABLE_KNOB;
+      });
+      const view = render(EDITABLE_KNOB, KNOB);
+      choose(view, "ESC");
+      button(view, "Apply").click();
+      await vi.waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls).toEqual([
+        ["set_keycode", { path: PATH, assignment: { ...KNOB, keycode: KC_ESC } }],
+      ]);
     });
   });
 });

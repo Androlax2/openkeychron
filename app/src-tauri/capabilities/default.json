@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window may list devices and read their info, keymap, macros and settings, and write the keymap through the guarded write path: set one key, undo a change, redo an undone change, restore the backup.",
+  "description": "The main window may list devices and read their info, keymap, macros and settings, and write the keymap through the guarded write path: set one key or one knob turn, undo a change, redo an undone change, restore the backup.",
   "windows": ["main"],
   "permissions": [
     "allow-list-devices",
@@ -10,6 +10,7 @@
     "allow-read-macros",
     "allow-read-settings",
     "allow-set-keycode",
+    "allow-set-encoder-keycode",
     "allow-undo-keymap-change",
     "allow-redo-keymap-change",
     "allow-restore-keymap-backup"

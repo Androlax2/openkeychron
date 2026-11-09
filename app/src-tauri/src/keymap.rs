@@ -1,10 +1,11 @@
 //! What `read_keymap` returns: every layer's raw keycodes and their QMK names on the matrix
-//! grid, with each physical key's place on the keyboard and its built-in legends.
-//! Only reads.
+//! grid, with each physical key's place on the keyboard and its built-in legends, and what each
+//! turn of each encoder sends. Only reads.
 
 use openkeychron_hid::{HidTransport, KeychronDevice};
 use openkeychron_via::{
-    DeviceRegistry, Keycode, Legends, Rectangle, RegisteredLayout, RegisteredModel, Via,
+    DeviceRegistry, EncoderDirection, Keycode, Legends, Rectangle, RegisteredLayout,
+    RegisteredModel, Via, ViaError,
 };
 use serde::Serialize;
 
@@ -27,6 +28,28 @@ pub struct Layer {
     pub index: u8,
     /// Row by row, `columns` keys per row.
     pub keys: Vec<Key>,
+    /// Each encoder of the layout, by index.
+    pub encoders: Vec<Encoder>,
+}
+
+/// What turning one encoder sends on one layer.
+#[derive(Debug, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct Encoder {
+    /// The encoder's index, as `Key.encoder` names it on the key its press uses.
+    pub index: u8,
+    pub counter_clockwise: EncoderKeycode,
+    pub clockwise: EncoderKeycode,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct EncoderKeycode {
+    pub keycode: u16,
+    /// Named as `Key.name` is.
+    pub name: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -53,6 +76,8 @@ pub struct Key {
     /// Keychron custom keycode, such as `LOPTN`. Absent for any other custom or unknown
     /// keycode: show `keycode` then.
     pub name: Option<String>,
+    /// The index of the encoder whose press this key is, such as the V5 Max's knob.
+    pub encoder: Option<u8>,
 }
 
 /// A rectangle in key units: 1.0 is one standard key.
@@ -81,6 +106,7 @@ struct Placement {
     bounds: Rectangle,
     secondary_bounds: Option<Rectangle>,
     legends: Option<Legends>,
+    encoder: Option<u8>,
 }
 
 fn placement(layout: &RegisteredLayout, row: u8, column: u8) -> Option<Placement> {
@@ -89,12 +115,14 @@ fn placement(layout: &RegisteredLayout, row: u8, column: u8) -> Option<Placement
             bounds: key.bounds,
             secondary_bounds: key.secondary_bounds,
             legends: Some(key.legends),
+            encoder: key.encoder,
         }),
         RegisteredLayout::Definition(definition) => {
             definition.key(row, column).map(|key| Placement {
                 bounds: key.bounds,
                 secondary_bounds: key.secondary_bounds,
                 legends: None,
+                encoder: key.encoder,
             })
         }
     }
@@ -125,19 +153,66 @@ pub fn read<T: HidTransport>(
     let keycodes = via
         .keymap(usize::from(layer_count) * layer_size)
         .map_err(via_error)?;
+    let encoder_indexes = encoder_indexes(layout);
     let layers = (0..layer_count)
         .zip(keycodes.chunks(layer_size))
-        .map(|(index, layer_keycodes)| Layer {
-            index,
-            keys: keys(model, layer_keycodes),
+        .map(|(index, layer_keycodes)| {
+            Ok(Layer {
+                index,
+                keys: keys(model, layer_keycodes),
+                encoders: encoders(&mut via, model, index, &encoder_indexes)?,
+            })
         })
-        .collect();
+        .collect::<Result<_, ViaError>>()
+        .map_err(via_error)?;
     Ok(Keymap {
         layer_count,
         rows: layout.rows(),
         columns: layout.columns(),
         layers,
     })
+}
+
+/// The encoders the layout's keys name, in index order.
+fn encoder_indexes(layout: &RegisteredLayout) -> Vec<u8> {
+    let mut indexes: Vec<u8> = match layout {
+        RegisteredLayout::BuiltIn(layout) => {
+            layout.keys.iter().filter_map(|key| key.encoder).collect()
+        }
+        RegisteredLayout::Definition(definition) => definition
+            .keys
+            .iter()
+            .filter_map(|key| key.encoder)
+            .collect(),
+    };
+    indexes.sort_unstable();
+    indexes.dedup();
+    indexes
+}
+
+fn encoders<T: HidTransport>(
+    via: &mut Via<T>,
+    model: &RegisteredModel,
+    layer: u8,
+    indexes: &[u8],
+) -> Result<Vec<Encoder>, ViaError> {
+    let mut turn = |index, direction| -> Result<EncoderKeycode, ViaError> {
+        let keycode = via.encoder_keycode(layer, index, direction)?;
+        Ok(EncoderKeycode {
+            keycode: u16::from(keycode),
+            name: model.keycode_name(keycode),
+        })
+    };
+    indexes
+        .iter()
+        .map(|&index| {
+            Ok(Encoder {
+                index,
+                counter_clockwise: turn(index, EncoderDirection::CounterClockwise)?,
+                clockwise: turn(index, EncoderDirection::Clockwise)?,
+            })
+        })
+        .collect()
 }
 
 fn keys(model: &RegisteredModel, keycodes: &[Keycode]) -> Vec<Key> {
@@ -160,10 +235,12 @@ fn keys(model: &RegisteredModel, keycodes: &[Keycode]) -> Vec<Key> {
                 is_physical: placement.is_some(),
                 bounds: placement.as_ref().map(|placement| placement.bounds.into()),
                 secondary_bounds: placement
+                    .as_ref()
                     .and_then(|placement| placement.secondary_bounds)
                     .map(Bounds::from),
                 keycode: u16::from(*keycode),
                 name: model.keycode_name(*keycode),
+                encoder: placement.as_ref().and_then(|placement| placement.encoder),
             }
         })
         .collect()
@@ -173,12 +250,12 @@ fn keys(model: &RegisteredModel, keycodes: &[Keycode]) -> Vec<Key> {
 mod tests {
     use openkeychron_via::{DeviceRegistry, ViaDefinition};
 
-    use super::{Bounds, Key, Keymap, keys, read};
+    use super::{Bounds, Encoder, EncoderKeycode, Key, Keymap, keys, read};
     use crate::test_support::{lend, load_fixture, replay};
 
     #[test]
     fn reads_every_layer_with_physical_legends_and_raw_keycodes() {
-        let mut replay = replay("cli-keymap.toml");
+        let mut replay = replay("app-keymap.toml");
         let keymap = read(lend(&mut replay.transport), &replay.device).unwrap();
         assert_eq!(
             (keymap.layer_count, keymap.rows, keymap.columns),
@@ -210,6 +287,7 @@ mod tests {
                 secondary_bounds: None,
                 keycode: 0x0014,
                 name: Some("Q".to_owned()),
+                encoder: None,
             }
         );
         assert_eq!(keymap.layers[0].keys[1].legend, None);
@@ -220,7 +298,7 @@ mod tests {
     }
 
     fn read_synthetic_keymap() -> Keymap {
-        let mut replay = replay("cli-keymap.toml");
+        let mut replay = replay("app-keymap.toml");
         read(lend(&mut replay.transport), &replay.device).unwrap()
     }
 
@@ -285,6 +363,52 @@ mod tests {
         let layer_size = usize::from(model.layout().rows()) * usize::from(model.layout().columns());
         let placed = keys(model, &vec![0x7e00u16.into(); layer_size]);
         assert!(placed.iter().all(|key| key.name.is_none()));
+    }
+
+    #[test]
+    fn reads_what_each_turn_of_the_knob_sends_with_its_name() {
+        let keymap = read_synthetic_keymap();
+        assert_eq!(
+            keymap.layers[0].encoders,
+            [Encoder {
+                index: 0,
+                counter_clockwise: EncoderKeycode {
+                    keycode: 0x00aa,
+                    name: Some("VOLD".to_owned()),
+                },
+                clockwise: EncoderKeycode {
+                    keycode: 0x00a9,
+                    name: Some("VOLU".to_owned()),
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn reads_the_knob_of_every_layer() {
+        let keymap = read_synthetic_keymap();
+        let layer_1 = &keymap.layers[1].encoders[0];
+        assert_eq!(
+            (layer_1.counter_clockwise.keycode, layer_1.clockwise.keycode),
+            (0x0001, 0xcafe)
+        );
+    }
+
+    #[test]
+    fn gives_an_unknown_turn_keycode_no_name() {
+        let keymap = read_synthetic_keymap();
+        assert_eq!(keymap.layers[1].encoders[0].clockwise.name, None);
+    }
+
+    #[test]
+    fn marks_the_knob_as_the_press_of_encoder_zero() {
+        let keymap = read_synthetic_keymap();
+        let pressed: Vec<_> = keymap.layers[0]
+            .keys
+            .iter()
+            .filter_map(|key| key.encoder.map(|encoder| (key.row, key.column, encoder)))
+            .collect();
+        assert_eq!(pressed, [(0, 18, 0)]);
     }
 
     #[test]

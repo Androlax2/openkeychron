@@ -24,7 +24,11 @@ export type Layer = { index: number,
 /**
  * Row by row, `columns` keys per row.
  */
-keys: Array<Key>, };
+keys: Array<Key>, 
+/**
+ * Each encoder of the layout, by index.
+ */
+encoders: Array<Encoder>, };
 
 export type Key = { row: number, column: number, 
 /**
@@ -57,6 +61,22 @@ secondaryBounds: Bounds | null, keycode: number,
  * Keychron custom keycode, such as `LOPTN`. Absent for any other custom or unknown
  * keycode: show `keycode` then.
  */
+name: string | null, 
+/**
+ * The index of the encoder whose press this key is, such as the V5 Max's knob.
+ */
+encoder: number | null, };
+
+export type Encoder = { 
+/**
+ * The encoder's index, as `Key.encoder` names it on the key its press uses.
+ */
+index: number, counterClockwise: EncoderKeycode, clockwise: EncoderKeycode, };
+
+export type EncoderKeycode = { keycode: number, 
+/**
+ * Named as `Key.name` is.
+ */
 name: string | null, };
 
 export type Bounds = { x: number, y: number, width: number, height: number, };
@@ -76,6 +96,10 @@ redoSteps: number,
 canRestoreBackup: boolean, };
 
 export type KeyAssignment = { layer: number, row: number, column: number, keycode: number, };
+
+export type EncoderAssignment = { layer: number, encoder: number, direction: TurnDirection, keycode: number, };
+
+export type TurnDirection = "clockwise" | "counterClockwise";
 
 export type KeycodeCategory = { name: string, keycodes: Array<KeycodeChoice>, };
 

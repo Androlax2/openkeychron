@@ -149,8 +149,9 @@ OPENKEYCHRON_FIXTURE=/tmp/openkeychron-mock pnpm --dir app tauri dev
   with "the mock keyboard refuses …".
 - Any other `.toml` file is a fixture. Every command replays it from the start through
   `ReplayTransport`, like the CLI's `--fixture`. A fixture device therefore answers only the
-  command it recorded, as often as the UI asks: `cli-keymap.toml` answers `read_keymap`, and
-  any other command on it fails with the replay's "write #0 sent …" error. Writes are checked
+  command it recorded, as often as the UI asks: `app-keymap.toml` answers `read_keymap` (the
+  CLI's `cli-keymap.toml` lacks the encoder reads the app makes), and any other command on it
+  fails with the replay's "write #0 sent …" error. Writes are checked
   against the fixture in memory and go nowhere else: a later read still returns what the
   fixture recorded.
 - The app refuses to start when the variable is empty, the directory cannot be read or holds
